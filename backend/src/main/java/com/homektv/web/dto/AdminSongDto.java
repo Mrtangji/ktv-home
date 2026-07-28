@@ -10,6 +10,7 @@ public record AdminSongDto(
         String language,
         String[] tags,
         String mediaType,
+        String lyricType,
         int durationMs,
         int playCount,
         String filePath,
@@ -18,7 +19,7 @@ public record AdminSongDto(
     public static AdminSongDto from(Song song, SongFile file) {
         String source = file == null ? "UNKNOWN" : file.isTranscodeRequired() ? "TRANSCODED" : "COPIED";
         return new AdminSongDto(song.getId(), song.getTitle(), song.getArtist(), song.getLanguage(), song.getTags(),
-                song.getMediaType(), song.getDurationMs(), song.getPlayCount(),
+                song.getMediaType(), song.getLyricType(), song.getDurationMs(), song.getPlayCount(),
                 file == null ? null : file.getFilePath(), source);
     }
 }

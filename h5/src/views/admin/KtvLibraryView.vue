@@ -15,7 +15,7 @@
       </tbody></table></div>
       <div class="pager"><span>第 {{ page + 1 }} / {{ totalPages || 1 }} 页</span><div><button class="secondary" :disabled="page===0" @click="go(page-1)">上一页</button><button class="secondary" :disabled="page>=totalPages-1" @click="go(page+1)">下一页</button></div></div>
     </section>
-    <div v-if="editing" class="mask" @click.self="editing=null"><div class="modal"><h2>编辑歌曲信息</h2><label>歌名<input v-model="form.title" /></label><label>歌手<input v-model="form.artist" /></label><label>语种<select v-model="form.language"><option value="国语">国语</option><option value="粤语">粤语</option><option value="英语">英语</option><option value="日语">日语</option><option value="其他">其他</option></select></label><label>歌词<textarea v-model="form.lyricText" rows="5" placeholder="可选，支持 LRC"></textarea></label><div class="modal-actions"><button class="secondary" @click="editing=null">取消</button><button class="primary" @click="save">保存</button></div></div></div>
+    <div v-if="editing" class="mask" @click.self="editing=null"><div class="modal"><h2>编辑歌曲信息</h2><label>歌名<input v-model="form.title" /></label><label>歌手<input v-model="form.artist" /></label><label>语种<select v-model="form.language"><option value="国语">国语</option><option value="粤语">粤语</option><option value="英语">英语</option><option value="日语">日语</option><option value="其他">其他</option></select></label><label>歌词<textarea v-model="form.lyricText" rows="5" :disabled="lyricLoading" :placeholder="lyricLoading?'正在读取歌词…':'可选，支持 LRC'"></textarea></label><div class="modal-actions"><button class="secondary" @click="editing=null">取消</button><button class="primary" :disabled="lyricLoading" @click="save">保存</button></div></div></div>
   </AdminLayout>
 </template>
 
@@ -24,13 +24,13 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import api from '../../api/client'
 import AdminLayout from './AdminLayout.vue'
 import { alertDialog, confirmDialog } from '../../composables/useDialog'
-const songs=ref([]),total=ref(0),page=ref(0),totalPages=ref(1),selected=ref(new Set()),editing=ref(null)
+const songs=ref([]),total=ref(0),page=ref(0),totalPages=ref(1),selected=ref(new Set()),editing=ref(null),lyricLoading=ref(false)
 const filters=reactive({keyword:'',type:'',source:''}),form=reactive({title:'',artist:'',language:'国语',lyricText:''})
 const allSelected=computed(()=>songs.value.length>0&&songs.value.every(s=>selected.value.has(s.id)))
 async function load(){const r=await api.adminSongs({...filters,page:page.value,size:20});songs.value=r.content||[];total.value=r.total||0;totalPages.value=r.totalPages||1;selected.value=new Set([...selected.value].filter(id=>songs.value.some(s=>s.id===id)))}
 function search(){page.value=0;load()}function reset(){Object.assign(filters,{keyword:'',type:'',source:''});search()}function go(p){if(p>=0&&p<totalPages.value){page.value=p;load()}}
 function toggle(id){const n=new Set(selected.value);n.has(id)?n.delete(id):n.add(id);selected.value=n}function toggleAll(){selected.value=allSelected.value?new Set():new Set(songs.value.map(s=>s.id))}
-function edit(song){editing.value=song;Object.assign(form,{title:song.title,artist:song.artist,language:song.language||'国语',lyricText:''})}
+async function edit(song){editing.value=song;lyricLoading.value=false;Object.assign(form,{title:song.title,artist:song.artist,language:song.language||'国语',lyricText:''});if(!song.lyricType||song.lyricType==='none')return;lyricLoading.value=true;try{const text=await api.lyricText(song.id);if(editing.value?.id===song.id)form.lyricText=text||''}catch(e){if(editing.value?.id===song.id)await alertDialog(e.message||'歌词读取失败')}finally{if(editing.value?.id===song.id)lyricLoading.value=false}}
 async function save(){try{await api.adminEditSong(editing.value.id,{title:form.title,artist:form.artist,language:form.language,lyricText:form.lyricText||null});editing.value=null;await load()}catch(e){await alertDialog(e.message||'保存失败')}}
 async function deleteOne(song){if(!await confirmDialog(`《${song.title}》及 /music 中的实际文件将被删除。`,{title:'删除 KTV 歌曲',tone:'warning'}))return;try{await api.adminDeleteSong(song.id);await load()}catch(e){await alertDialog(e.message||'删除失败')}}
 async function deleteSelected(){if(!await confirmDialog(`将删除 ${selected.value.size} 首歌曲及其 /music 中的实际文件。`,{title:'批量删除 KTV 歌曲',tone:'warning'}))return;try{await api.adminDeleteSongs([...selected.value]);selected.value=new Set();await load()}catch(e){await alertDialog(e.message||'批量删除失败')}}

@@ -27,6 +27,7 @@ export const api = {
   searchSongs: (keyword, type = '', page = 0) =>
     request(`/songs?keyword=${encodeURIComponent(keyword)}&type=${type}&page=${page}`),
   songDetail: (id) => request(`/songs/${id}`),
+  lyricText: (id) => request(`/lyric/${id}`),
 
   // 队列/控制（P1.9~P1.12）
   getQueue: () => request('/queue'),
