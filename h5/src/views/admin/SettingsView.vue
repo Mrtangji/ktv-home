@@ -65,7 +65,7 @@ const Toggle = {
 }
 
 const transcodeDefaults = { direct_copy_containers:['mp4','m4v','mkv'], direct_copy_video_codecs:['h264','hevc'], direct_copy_audio_codecs:['aac','mp3'], transcode_audio_only:false, transcode_output_container:'mkv', transcode_video_codec:'h264', transcode_audio_codec:'aac', transcode_hardware_acceleration:false }
-const s = reactive({ qr_address: '', standby_carousel: true, anti_burn: true, mini_qr: true, standby_welcome: '今晚开唱', standby_subtitle: '手机点歌，电视欢唱\n一家人的客厅 KTV', standby_source: 'mixed', standby_song_ids: [], standby_interval_sec: 8, ...transcodeDefaults })
+const s = reactive({ qr_address: '', standby_carousel: true, anti_burn: true, mini_qr: true, standby_welcome: '今晚开唱', standby_subtitle: '手机点歌，电视欢唱\n一家人的客厅 KTV', standby_source: 'mixed', standby_song_ids: [], standby_interval_sec: 8, transcode_hardware_auto_configured: false, ...transcodeDefaults })
 const containerOptions=[
   {value:'mp4',label:'MP4'},{value:'m4v',label:'M4V'},{value:'mkv',label:'MKV'},{value:'mov',label:'MOV'},
   {value:'ts',label:'TS'},{value:'m2ts',label:'M2TS'},{value:'mts',label:'MTS'},{value:'mpg',label:'MPG'},
@@ -105,6 +105,18 @@ onMounted(async () => {
   Object.assign(s, loaded)
   Object.assign(hardwareStatus, detected)
   if (s.transcode_hardware_acceleration && !hardwareStatus.available) s.transcode_hardware_acceleration = false
+  const hardwareSupportsCodec = hardwareStatus.available && (hardwareStatus.supportedCodecs || []).includes(s.transcode_video_codec)
+  if (hardwareSupportsCodec && !s.transcode_hardware_auto_configured) {
+    try {
+      const updated = await api.adminPutSettings({
+        transcode_hardware_acceleration: true,
+        transcode_hardware_auto_configured: true
+      })
+      Object.assign(s, updated)
+    } catch {
+      s.transcode_hardware_acceleration = false
+    }
+  }
   customSongIds.value = Array.isArray(loaded.standby_song_ids) ? loaded.standby_song_ids.join(', ') : ''
   Object.assign(content, await api.standbyContent().catch(() => ({})))
   wishes.value = await api.adminWishes().catch(() => [])
@@ -122,6 +134,7 @@ async function save() {
   }
 }
 async function toggleHardware(enabled) {
+  s.transcode_hardware_auto_configured = true
   if (!enabled) { s.transcode_hardware_acceleration = false; return }
   const detected = await api.adminTranscodeHardware().catch(e => ({ available:false, reason:e.message||'硬件检测失败' }))
   Object.assign(hardwareStatus, detected)

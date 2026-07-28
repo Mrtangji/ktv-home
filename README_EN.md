@@ -153,10 +153,13 @@ the order **vocal first, accompaniment second** and preferably label the tracks
 
 ## Hardware Transcoding
 
-CPU transcoding is the default. Linux hosts with Intel or AMD VAAPI devices can
-add `docker-compose.hardware.yml`; Rockchip hosts can add
-`docker-compose.rockchip.yml`. See the [Chinese hardware-transcoding section](README.md#硬件转码)
-for the exact commands and host-device requirements.
+CPU transcoding is the default. Hardware encoding has currently been verified
+only on Intel GPUs using the VAAPI `iHD` driver for H.264 and HEVC. AMD VAAPI
+and Rockchip RK MPP have not been verified on physical hardware; their Compose
+files provide device passthrough but do not guarantee that the prebuilt image
+can enable hardware encoding out of the box. See the
+[Chinese hardware-transcoding section](README.md#硬件转码) for the exact commands
+and host-device requirements.
 
 ## License and Media Responsibility
 

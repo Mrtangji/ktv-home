@@ -12,7 +12,11 @@ services:
       POSTGRES_PASSWORD: ${KTV_DB_PASSWORD:-ktv}
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
-      - ktv-pg:/var/lib/postgresql/data
+      - type: bind
+        source: ${KTV_PG_DIR:-./postgres}
+        target: /var/lib/postgresql/data
+        bind:
+          create_host_path: true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -71,7 +75,11 @@ services:
         target: /music
         bind:
           create_host_path: true
-      - ktv-data:/data
+      - type: bind
+        source: ${KTV_DATA_DIR:-./data}
+        target: /data
+        bind:
+          create_host_path: true
     depends_on:
       db:
         condition: service_healthy
@@ -83,11 +91,3 @@ services:
       start_period: 30s
     restart: unless-stopped
     stop_grace_period: 30s
-
-volumes:
-  # Persistent application data, including generated assets and local state.
-  # 持久化应用数据，包括生成资源和本地状态。
-  ktv-data:
-    name: ${KTV_DATA_VOLUME:-home-ktv-data}
-  ktv-pg:
-    name: ${KTV_PG_VOLUME:-home-ktv-postgres}

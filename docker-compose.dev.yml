@@ -6,7 +6,11 @@ services:
     image: postgres:16-alpine
     container_name: ktv-db-dev
     volumes:
-      - ktv-pg-dev:/var/lib/postgresql/data
+      - type: bind
+        source: ./postgres-dev
+        target: /var/lib/postgresql/data
+        bind:
+          create_host_path: true
     environment:
       - POSTGRES_USER=ktv
       - POSTGRES_PASSWORD=ktv
@@ -20,6 +24,3 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-
-volumes:
-  ktv-pg-dev:

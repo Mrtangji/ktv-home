@@ -247,6 +247,8 @@ source-music/
 | --- | --- | --- |
 | `KTV_SOURCE_MUSIC_DIR` | `./source-music` | 宿主机原始素材目录 |
 | `KTV_MUSIC_DIR` | `./music` | 宿主机可点播曲库目录 |
+| `KTV_DATA_DIR` | `./data` | 宿主机应用数据目录 |
+| `KTV_PG_DIR` | `./postgres` | 宿主机 PostgreSQL 数据目录 |
 | `KTV_HTTP_PORT` | `8080` | Web、API、WebSocket 和媒体流端口 |
 | `KTV_DISCOVERY_UDP_PORT` | `18888` | TV 自动发现 UDP 端口 |
 | `KTV_DISCOVERY_NAME` | `家庭KTV` | TV 发现列表中的名称 |
@@ -262,7 +264,11 @@ source-music/
 
 ## 硬件转码
 
-默认使用 CPU 转码。Intel 或 AMD Linux 主机可透传 VAAPI 设备：
+默认使用 CPU 转码。Linux 主机可通过以下方式透传 VAAPI 设备：
+
+> **验证范围：**目前只在 Intel 核显上验证了 VAAPI H.264 / HEVC 硬件编码，
+> 使用 Intel `iHD` 驱动。AMD VAAPI 和 Rockchip RK MPP 尚未经过实机验证，
+> 相关 Compose 配置仅表示支持设备透传，不保证预编译镜像可以直接启用硬件编码。
 
 ```bash
 docker compose \
@@ -271,7 +277,9 @@ docker compose \
   up -d --build --wait
 ```
 
-宿主机需要提供 `/dev/dri`。启动后在管理后台“系统设置”中检测并开启硬件加速；设备、权限或编码器不可用时系统会拒绝保存。
+宿主机需要提供 `/dev/dri`。Intel 设备还需要容器内存在 `iHD_drv_video.so`；
+官方预编译的 AMD64 镜像会安装 `intel-media-driver`。启动后在管理后台“系统设置”
+中检测并开启硬件加速；设备、驱动、权限或编码器不可用时系统会拒绝保存。
 
 瑞芯微设备可使用：
 

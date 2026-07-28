@@ -32,6 +32,8 @@ android-tv/third_party/
 sample-music/
 music/
 /source-music/
+/postgres/
+/postgres-dev/
 backend/data/
 /data/
 backend/src/main/resources/application-local.yml

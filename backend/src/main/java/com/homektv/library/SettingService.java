@@ -25,7 +25,8 @@ public class SettingService {
             "transcode_output_container", "mkv",
             "transcode_video_codec", "h264",
             "transcode_audio_codec", "aac",
-            "transcode_hardware_acceleration", false
+            "transcode_hardware_acceleration", false,
+            "transcode_hardware_auto_configured", false
     );
     private static final Set<String> TRANSCODE_KEYS = TRANSCODE_DEFAULTS.keySet();
 
