@@ -44,6 +44,7 @@ public class StandbyContentService {
         result.put("antiBurn", bool(settings, "anti_burn", true));
         result.put("intervalSeconds", integer(settings, "standby_interval_sec", 8, 3, 60));
         result.put("source", source);
+        result.put("videoScaleMode", option(settings, "tv_video_scale_mode", Set.of("fit", "zoom", "fill"), "zoom"));
         result.put("logoUrl", settings.get("standby_logo_path") == null ? null : "/api/standby/logo");
         result.put("songs", songs.stream().map(SongDto::from).toList());
         return result;
@@ -102,4 +103,5 @@ public class StandbyContentService {
     private String string(Map<String, Object> values, String key, String fallback) { Object value = values.get(key); return value == null || value.toString().isBlank() ? fallback : value.toString(); }
     private boolean bool(Map<String, Object> values, String key, boolean fallback) { Object value = values.get(key); return value instanceof Boolean b ? b : value == null ? fallback : Boolean.parseBoolean(value.toString()); }
     private int integer(Map<String, Object> values, String key, int fallback, int min, int max) { Object value = values.get(key); int parsed = value instanceof Number n ? n.intValue() : fallback; return Math.max(min, Math.min(max, parsed)); }
+    private String option(Map<String, Object> values, String key, Set<String> allowed, String fallback) { String value = string(values, key, fallback).toLowerCase(Locale.ROOT); return allowed.contains(value) ? value : fallback; }
 }

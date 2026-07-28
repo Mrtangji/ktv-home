@@ -22,6 +22,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import androidx.appcompat.app.AppCompatActivity
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.lifecycle.lifecycleScope
 import com.homektv.tv.R
 import com.homektv.tv.databinding.ActivityMainBinding
@@ -425,6 +426,14 @@ class MainActivity : AppCompatActivity(), KtvSocket.Listener {
         binding.remoteMicrophone.text = if (microphoneActive) "麦克风：开" else "麦克风：关"
     }
 
+    private fun applyVideoScaleMode(mode: String) {
+        binding.playerView.resizeMode = when (mode) {
+            "fit" -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+            "fill" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+            else -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+        }
+    }
+
     private var currentVolume = 60
     private var currentMuted = false
     private var currentVocalMode = "accompaniment"
@@ -669,6 +678,7 @@ class MainActivity : AppCompatActivity(), KtvSocket.Listener {
     }
 
     private fun applyStandbyContent(content: StandbyContent) {
+        applyVideoScaleMode(content.videoScaleMode)
         standbyCarouselEnabled = content.carouselEnabled
         antiBurnEnabled = content.antiBurn
         standbyIntervalMs = content.intervalSeconds.coerceIn(3, 60) * 1_000L

@@ -42,6 +42,7 @@ public class SettingService {
     @Transactional(readOnly = true)
     public Map<String, Object> getAll() {
         Map<String, Object> out = new HashMap<>(TRANSCODE_DEFAULTS);
+        out.put("tv_video_scale_mode", "zoom");
         for (Setting s : repo.findAll()) {
             out.put(s.getKey(), parse(s.getValue()));
         }

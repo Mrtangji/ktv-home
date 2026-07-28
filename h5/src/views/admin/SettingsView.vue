@@ -21,6 +21,7 @@
     <div class="row"><span class="k">硬件加速</span><Toggle :model-value="s.transcode_hardware_acceleration" @update:model-value="toggleHardware" /><span class="hardware-state" :class="hardwareStatus.available ? 'available' : 'dim'">{{ hardwareStatusText }}</span></div>
 
     <div class="grp">TV 显示设置</div>
+    <div class="row"><span class="k">视频画面模式</span><select class="v-input" v-model="s.tv_video_scale_mode"><option value="zoom">铺满（等比裁切）</option><option value="fit">原画（完整显示）</option><option value="fill">拉伸（充满屏幕）</option></select></div>
     <div class="row"><span class="k">待机热门轮播</span><Toggle v-model="s.standby_carousel" /></div>
     <div class="row"><span class="k">防烧屏微移</span><Toggle v-model="s.anti_burn" /></div>
     <div class="row"><span class="k">播放页迷你二维码</span><Toggle v-model="s.mini_qr" /></div>
@@ -65,7 +66,7 @@ const Toggle = {
 }
 
 const transcodeDefaults = { direct_copy_containers:['mp4','m4v','mkv'], direct_copy_video_codecs:['h264','hevc'], direct_copy_audio_codecs:['aac','mp3'], transcode_audio_only:false, transcode_output_container:'mkv', transcode_video_codec:'h264', transcode_audio_codec:'aac', transcode_hardware_acceleration:false }
-const s = reactive({ qr_address: '', standby_carousel: true, anti_burn: true, mini_qr: true, standby_welcome: '今晚开唱', standby_subtitle: '手机点歌，电视欢唱\n一家人的客厅 KTV', standby_source: 'mixed', standby_song_ids: [], standby_interval_sec: 8, transcode_hardware_auto_configured: false, ...transcodeDefaults })
+const s = reactive({ qr_address: '', tv_video_scale_mode: 'zoom', standby_carousel: true, anti_burn: true, mini_qr: true, standby_welcome: '今晚开唱', standby_subtitle: '手机点歌，电视欢唱\n一家人的客厅 KTV', standby_source: 'mixed', standby_song_ids: [], standby_interval_sec: 8, transcode_hardware_auto_configured: false, ...transcodeDefaults })
 const containerOptions=[
   {value:'mp4',label:'MP4'},{value:'m4v',label:'M4V'},{value:'mkv',label:'MKV'},{value:'mov',label:'MOV'},
   {value:'ts',label:'TS'},{value:'m2ts',label:'M2TS'},{value:'mts',label:'MTS'},{value:'mpg',label:'MPG'},

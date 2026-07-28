@@ -194,7 +194,7 @@
         android:background="@android:color/black"
         android:visibility="gone"
         app:use_controller="false"
-        app:resize_mode="fit"
+        app:resize_mode="zoom"
         app:surface_type="surface_view" />
 
     <!-- TV-02 KTV 视频播放页叠加层 -->
