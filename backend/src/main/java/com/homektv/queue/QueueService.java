@@ -54,6 +54,7 @@ public class QueueService {
         }
 
         if (!force) {
+            queueRepo.lockSongForOrder(songId);
             Optional<QueueItem> dup = queueRepo.findFirstBySongIdAndStatus(songId, WAITING);
             if (dup.isPresent()) {
                 int pos = positionOf(dup.get());

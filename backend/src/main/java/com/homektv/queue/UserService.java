@@ -21,24 +21,21 @@ public class UserService {
     @Transactional
     public Long resolveUserId(String clientToken) {
         if (clientToken == null || clientToken.isBlank()) return null;
+        userRepo.insertIfAbsent(clientToken, defaultNickname());
         return userRepo.findByClientToken(clientToken)
-                .orElseGet(() -> {
-                    AppUser u = new AppUser();
-                    u.setClientToken(clientToken);
-                    u.setNickname("家人" + (int) (Math.random() * 9000 + 1000));
-                    return userRepo.save(u);
-                })
+                .orElseThrow(() -> new IllegalStateException("用户创建后无法读取"))
                 .getId();
     }
 
     @Transactional
     public AppUser upsert(String clientToken, String nickname) {
-        AppUser u = userRepo.findByClientToken(clientToken).orElseGet(AppUser::new);
-        u.setClientToken(clientToken);
+        userRepo.insertIfAbsent(clientToken, defaultNickname());
+        AppUser u = userRepo.findByClientToken(clientToken)
+                .orElseThrow(() -> new IllegalStateException("用户创建后无法读取"));
         if (nickname != null && !nickname.isBlank()) {
             u.setNickname(dedupeNickname(nickname.trim(), clientToken));
         } else if (u.getNickname() == null) {
-            u.setNickname("家人" + (int) (Math.random() * 9000 + 1000));
+            u.setNickname(defaultNickname());
         }
         return userRepo.save(u);
     }
@@ -53,5 +50,9 @@ public class UserService {
                 .filter(x -> nickname.equals(x.getNickname()) || x.getNickname().startsWith(nickname + "#"))
                 .count();
         return sameName == 0 ? nickname : nickname + "#" + (sameName + 1);
+    }
+
+    private String defaultNickname() {
+        return "家人" + (int) (Math.random() * 9000 + 1000);
     }
 }

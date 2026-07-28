@@ -48,12 +48,7 @@ public class FavoriteController {
     public Map<String, Object> add(@PathVariable Long songId, @RequestBody Map<String, String> body) {
         Long userId = requireUser(body.get("clientToken"));
         if (!songRepo.existsById(songId)) throw new ApiException("SONG_NOT_FOUND", "歌曲不存在");
-        if (!favoriteRepo.existsByUserIdAndSongId(userId, songId)) {
-            Favorite favorite = new Favorite();
-            favorite.setUserId(userId);
-            favorite.setSongId(songId);
-            favoriteRepo.save(favorite);
-        }
+        favoriteRepo.insertIfAbsent(userId, songId);
         return Map.of("status", "ok", "favorite", true);
     }
 

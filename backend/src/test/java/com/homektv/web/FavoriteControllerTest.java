@@ -57,7 +57,11 @@ class FavoriteControllerTest {
     private FavoriteRepository favoriteRepository() {
         return proxy(FavoriteRepository.class, (method, args) -> switch (method.getName()) {
             case "findByUserIdOrderByCreatedAtDesc" -> List.copyOf(favorites);
-            case "existsByUserIdAndSongId" -> favorites.stream().anyMatch(f -> f.getUserId().equals(args[0]) && f.getSongId().equals(args[1]));
+            case "insertIfAbsent" -> {
+                boolean exists = favorites.stream().anyMatch(f -> f.getUserId().equals(args[0]) && f.getSongId().equals(args[1]));
+                if (!exists) favorites.add(favorite((Long) args[1]));
+                yield exists ? 0 : 1;
+            }
             case "save" -> { favorites.add((Favorite) args[0]); yield args[0]; }
             case "deleteByUserIdAndSongId" -> {
                 int before = favorites.size();

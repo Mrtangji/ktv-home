@@ -13,6 +13,7 @@ import com.homektv.repo.PlaylistSongRepository;
 import com.homektv.repo.SongRepository;
 import com.homektv.web.ApiException;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import com.homektv.library.AssetWriter;
@@ -59,7 +60,14 @@ public class AiLibraryService {
         AiAnalysisTask task = new AiAnalysisTask();
         task.setSongId(songId);
         task.setModel(properties.getAi().getModel());
-        task = taskRepository.save(task);
+        try {
+            task = taskRepository.saveAndFlush(task);
+        } catch (DataIntegrityViolationException conflict) {
+            if (taskRepository.findFirstBySongIdAndStatusInOrderByCreatedAtDesc(songId, ACTIVE_STATUSES).isPresent()) {
+                throw new ApiException("AI_TASK_EXISTS", "该歌曲已有待处理的 AI 任务");
+            }
+            throw conflict;
+        }
         worker.analyze(task.getId());
         return task;
     }
@@ -145,14 +153,11 @@ public class AiLibraryService {
     public Map<String, Object> addPlaylistSong(Long playlistId, Long songId) {
         requirePlaylist(playlistId);
         Song song = songRepository.findById(songId).orElseThrow(() -> new ApiException("SONG_NOT_FOUND", "歌曲不存在"));
+        playlistSongRepository.lockPlaylist(playlistId);
         List<PlaylistSong> current = playlistSongRepository.findByPlaylistIdOrderBySortOrder(playlistId);
         if (current.stream().anyMatch(item -> item.getSongId().equals(songId))) return playlistDetail(playlistId);
-        PlaylistSong item = new PlaylistSong();
-        item.setPlaylistId(playlistId);
-        item.setSongId(song.getId());
-        item.setSortOrder(current.stream().mapToInt(PlaylistSong::getSortOrder).max().orElse(-1) + 1);
-        item.setManual(true);
-        playlistSongRepository.save(item);
+        int sortOrder = current.stream().mapToInt(PlaylistSong::getSortOrder).max().orElse(-1) + 1;
+        playlistSongRepository.insertManualIfAbsent(playlistId, song.getId(), sortOrder);
         return playlistDetail(playlistId);
     }
 
@@ -230,8 +235,10 @@ public class AiLibraryService {
         if (name == null || name.isBlank() || tag == null || tag.isBlank()) {
             throw new ApiException("INVALID_ARGUMENT", "歌单名称和 AI 标签不能为空");
         }
-        Playlist playlist = playlistRepository.findByName(name.trim()).orElseGet(Playlist::new);
-        playlist.setName(name.trim());
+        String normalizedName = name.trim();
+        playlistRepository.lockGeneratedName(normalizedName);
+        Playlist playlist = playlistRepository.findByName(normalizedName).orElseGet(Playlist::new);
+        playlist.setName(normalizedName);
         playlist.setTheme(tag.trim());
         playlist.setDescription("由 AI 标签「" + tag.trim() + "」自动生成");
         playlist.setAiGenerated(true);

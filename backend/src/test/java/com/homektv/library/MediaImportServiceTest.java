@@ -11,6 +11,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,7 +20,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -58,7 +61,7 @@ class MediaImportServiceTest {
                 List.of("mp4", "m4v", "mkv"), List.of("h264", "hevc"), List.of("aac", "mp3"),
                 false, "mkv", "h264", "aac", false));
         when(importRepo.findBySourcePath(anyString())).thenReturn(Optional.empty());
-        when(importRepo.save(any())).thenAnswer(invocation -> {
+        when(importRepo.saveAndFlush(any())).thenAnswer(invocation -> {
             MediaImportRecord record = invocation.getArgument(0);
             saved.add(record);
             return record;
@@ -106,6 +109,92 @@ class MediaImportServiceTest {
             assertThat(files).isEmpty();
         }
         verifyNoInteractions(scanService);
+    }
+
+    @Test
+    void concurrentScansDoNotInsertTheSameSourcePathTwice() throws Exception {
+        Path source = sourceDir.resolve("戴玉强 - 无悔的选择.mpg");
+        Files.writeString(source, "legacy-media");
+        MediaProbe mediaProbe = new MediaProbe(1000, 2, 0, true, "1920x1080",
+                List.of(), "mpeg2video", "ac3");
+        CountDownLatch firstProbeStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirstProbe = new CountDownLatch(1);
+        AtomicReference<MediaImportRecord> persisted = new AtomicReference<>();
+        when(importRepo.findBySourcePath(source.toString()))
+                .thenAnswer(invocation -> Optional.ofNullable(persisted.get()));
+        when(probe.probe(source)).thenAnswer(invocation -> {
+            firstProbeStarted.countDown();
+            assertThat(releaseFirstProbe.await(5, TimeUnit.SECONDS)).isTrue();
+            return mediaProbe;
+        });
+        when(importRepo.saveAndFlush(any())).thenAnswer(invocation -> {
+            MediaImportRecord record = invocation.getArgument(0);
+            persisted.set(record);
+            saved.add(record);
+            return record;
+        });
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(service::scanSourceLibrary);
+            assertThat(firstProbeStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            var second = executor.submit(service::scanSourceLibrary);
+            releaseFirstProbe.countDown();
+
+            assertThat(first.get(5, TimeUnit.SECONDS).pendingTranscode()).isEqualTo(1);
+            assertThat(second.get(5, TimeUnit.SECONDS).pendingTranscode()).isZero();
+        }
+        verify(importRepo, times(1)).saveAndFlush(any());
+    }
+
+    @Test
+    void scanRecoversWhenAnotherInstanceInsertsTheRecordFirst() throws Exception {
+        Path source = sourceDir.resolve("歌手 - 并发导入.mpg");
+        Files.writeString(source, "legacy-media");
+        when(probe.probe(source)).thenReturn(new MediaProbe(1000, 2, 0, true, "1920x1080",
+                List.of(), "mpeg2video", "ac3"));
+        MediaImportRecord winner = new MediaImportRecord();
+        when(importRepo.findBySourcePath(source.toString()))
+                .thenReturn(Optional.empty(), Optional.of(winner));
+        when(importRepo.saveAndFlush(any()))
+                .thenThrow(new DataIntegrityViolationException("duplicate source_path"))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        MediaImportService.SourceScanResult result = service.scanSourceLibrary();
+
+        assertThat(result.pendingTranscode()).isEqualTo(1);
+        assertThat(winner.getSourcePath()).isEqualTo(source.toString());
+        assertThat(winner.getAction()).isEqualTo(MediaImportService.PENDING_TRANSCODE);
+        verify(importRepo, times(2)).saveAndFlush(any());
+    }
+
+    @Test
+    void successfulRescanUpdatesThePreviousFailedRecordWithoutCreatingAnother() throws Exception {
+        Path source = sourceDir.resolve("歌手 - 重试成功.mp4");
+        Files.writeString(source, "compatible-media");
+        AtomicReference<MediaImportRecord> persisted = new AtomicReference<>();
+        when(importRepo.findBySourcePath(source.toString()))
+                .thenAnswer(invocation -> Optional.ofNullable(persisted.get()));
+        when(importRepo.saveAndFlush(any())).thenAnswer(invocation -> {
+            MediaImportRecord record = invocation.getArgument(0);
+            persisted.compareAndSet(null, record);
+            return record;
+        });
+        when(probe.probe(source))
+                .thenThrow(new IllegalStateException("temporary probe failure"))
+                .thenReturn(new MediaProbe(1000, 2, 0, true, "1920x1080", List.of(), "h264", "aac"));
+
+        MediaImportService.SourceScanResult failed = service.scanSourceLibrary();
+        MediaImportRecord original = persisted.get();
+        MediaImportService.SourceScanResult succeeded = service.scanSourceLibrary();
+
+        assertThat(failed.failed()).isEqualTo(1);
+        assertThat(succeeded.copied()).isEqualTo(1);
+        assertThat(persisted.get()).isSameAs(original);
+        assertThat(original.getAction()).isEqualTo(MediaImportService.COPIED);
+        assertThat(original.isImportedFlag()).isTrue();
+        assertThat(service.getScanProgress().running()).isFalse();
+        assertThat(service.getScanProgress().completed()).isEqualTo(1);
+        verify(importRepo, times(2)).saveAndFlush(same(original));
     }
 
     @Test

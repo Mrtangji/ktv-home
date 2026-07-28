@@ -56,6 +56,16 @@ public class AdminScanController {
         return Map.of("sourceScan", sourceScan);
     }
 
+    @PostMapping("/scan/start")
+    public MediaImportService.SourceScanProgress startScan() {
+        return mediaImportService.startSourceScan();
+    }
+
+    @GetMapping("/scan/progress")
+    public MediaImportService.SourceScanProgress scanProgress() {
+        return mediaImportService.getScanProgress();
+    }
+
     @GetMapping("/source-library")
     public Map<String, Object> sourceLibrary(@RequestParam(defaultValue = "") String keyword,
                                              @RequestParam(defaultValue = "") String status,

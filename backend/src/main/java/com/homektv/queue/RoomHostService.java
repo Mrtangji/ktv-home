@@ -37,6 +37,7 @@ public class RoomHostService {
     @Transactional
     public Map<String, Object> claim(String clientToken) {
         AppUser user = requireUser(clientToken);
+        userRepository.lockRoomHost();
         Long existing = hostUserId();
         if (existing != null && !existing.equals(user.getId()) && userRepository.existsById(existing)) {
             throw new ApiException("HOST_ALREADY_CLAIMED", "房主已由其他用户认领");
@@ -47,6 +48,7 @@ public class RoomHostService {
 
     @Transactional
     public Map<String, Object> release(String clientToken) {
+        userRepository.lockRoomHost();
         requireHost(clientToken);
         settingService.putAll(Map.of(HOST_USER_ID, 0));
         return status(clientToken);

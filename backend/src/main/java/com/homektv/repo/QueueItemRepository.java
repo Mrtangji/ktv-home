@@ -2,6 +2,7 @@ package com.homektv.repo;
 
 import com.homektv.domain.QueueItem;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
 import java.util.Optional;
@@ -22,4 +23,7 @@ public interface QueueItemRepository extends JpaRepository<QueueItem, Long> {
     long countByStatus(String status);
 
     List<QueueItem> findBySongId(Long songId);
+
+    @Query(value = "SELECT pg_advisory_xact_lock(:songId)", nativeQuery = true)
+    void lockSongForOrder(Long songId);
 }

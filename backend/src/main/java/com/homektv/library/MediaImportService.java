@@ -12,6 +12,7 @@ import jakarta.annotation.PreDestroy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -55,6 +56,14 @@ public class MediaImportService {
         thread.setDaemon(true);
         return thread;
     });
+    private final ExecutorService scanExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "source-library-scan");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private final AtomicReference<SourceScanProgress> scanProgress = new AtomicReference<>(SourceScanProgress.idle());
+    private final Object scanStartLock = new Object();
+    private boolean scanScheduled;
     private final AtomicReference<TranscodeProgress> progress = new AtomicReference<>(TranscodeProgress.idle());
     private final Object transcodeLock = new Object();
     private final Deque<Long> transcodeQueue = new ArrayDeque<>();
@@ -79,6 +88,15 @@ public class MediaImportService {
                                    int skippedSourceDuplicate, int skippedOutputDuplicate,
                                    int unrecognized, int failed) {}
 
+    public record SourceScanProgress(boolean running, int total, int completed, String currentFile,
+                                     int copied, int pendingTranscode, int skippedSourceDuplicate,
+                                     int skippedOutputDuplicate, int unrecognized, int failed,
+                                     OffsetDateTime startedAt, OffsetDateTime finishedAt) {
+        static SourceScanProgress idle() {
+            return new SourceScanProgress(false, 0, 0, null, 0, 0, 0, 0, 0, 0, null, null);
+        }
+    }
+
     public record TranscodeProgress(boolean running, int total, int completed, int transcoded,
                                     int copiedSkipped, int skippedSourceDuplicate,
                                     int skippedOutputDuplicate, int failed, String currentFile,
@@ -96,14 +114,21 @@ public class MediaImportService {
 
     public record AutoCleanupResult(int scanned, int eligible, int deleted, int skipped, int failed) {}
 
-    public SourceScanResult scanSourceLibrary() {
+    public synchronized SourceScanResult scanSourceLibrary() {
         Path sourceRoot = sourceRoot();
         Path targetRoot = targetRoot();
         ensureDirectories(sourceRoot, targetRoot);
 
         List<Path> files = mediaFiles(sourceRoot);
+        OffsetDateTime startedAt = OffsetDateTime.now();
+        scanProgress.set(new SourceScanProgress(true, files.size(), 0, null, 0, 0, 0, 0, 0, 0,
+                startedAt, null));
         int copied = 0, pending = 0, sourceDup = 0, outputDup = 0, unrecognized = 0, failed = 0;
-        for (Path source : files) {
+        for (int index = 0; index < files.size(); index++) {
+            Path source = files.get(index);
+            scanProgress.set(new SourceScanProgress(true, files.size(), index,
+                    source.getFileName().toString(), copied, pending, sourceDup, outputDup, unrecognized, failed,
+                    startedAt, null));
             try {
                 ScanOutcome outcome = analyzeAndMaybeCopy(source, targetRoot);
                 switch (outcome) {
@@ -119,8 +144,45 @@ public class MediaImportService {
                 upsertRecord(source, null, null, null, null, FAILED, messageOf(e), false,
                         false, false, null, null);
             }
+            scanProgress.set(new SourceScanProgress(true, files.size(), index + 1,
+                    source.getFileName().toString(), copied, pending, sourceDup, outputDup, unrecognized, failed,
+                    startedAt, null));
         }
-        return new SourceScanResult(files.size(), copied, pending, sourceDup, outputDup, unrecognized, failed);
+        SourceScanResult result = new SourceScanResult(files.size(), copied, pending, sourceDup, outputDup,
+                unrecognized, failed);
+        scanProgress.set(new SourceScanProgress(false, files.size(), files.size(), null, copied, pending,
+                sourceDup, outputDup, unrecognized, failed, startedAt, OffsetDateTime.now()));
+        return result;
+    }
+
+    public SourceScanProgress startSourceScan() {
+        synchronized (scanStartLock) {
+            SourceScanProgress current = scanProgress.get();
+            if (scanScheduled || current.running()) return current;
+            scanScheduled = true;
+            scanProgress.set(new SourceScanProgress(true, 0, 0, null, 0, 0, 0, 0, 0, 0,
+                    OffsetDateTime.now(), null));
+            scanExecutor.submit(() -> {
+                try {
+                    scanSourceLibrary();
+                } catch (RuntimeException exception) {
+                    SourceScanProgress failed = scanProgress.get();
+                    scanProgress.set(new SourceScanProgress(false, failed.total(), failed.completed(), null,
+                            failed.copied(), failed.pendingTranscode(), failed.skippedSourceDuplicate(),
+                            failed.skippedOutputDuplicate(), failed.unrecognized(), failed.failed() + 1,
+                            failed.startedAt(), OffsetDateTime.now()));
+                } finally {
+                    synchronized (scanStartLock) {
+                        scanScheduled = false;
+                    }
+                }
+            });
+            return scanProgress.get();
+        }
+    }
+
+    public SourceScanProgress getScanProgress() {
+        return scanProgress.get();
     }
 
     public Page<MediaImportRecord> listSourceLibrary(String keyword, String status, String formatAnalysis,
@@ -422,6 +484,22 @@ public class MediaImportService {
                               String action, String reason, boolean transcodeRequired, boolean duplicate,
                               boolean imported, Long songId, Long songFileId) {
         MediaImportRecord record = importRepo.findBySourcePath(source.toString()).orElseGet(MediaImportRecord::new);
+        applyRecordValues(record, source, sourceMd5, output, probe, outputMd5, action, reason,
+                transcodeRequired, duplicate, imported, songId, songFileId);
+        try {
+            importRepo.saveAndFlush(record);
+        } catch (DataIntegrityViolationException conflict) {
+            MediaImportRecord existing = importRepo.findBySourcePath(source.toString()).orElseThrow(() -> conflict);
+            applyRecordValues(existing, source, sourceMd5, output, probe, outputMd5, action, reason,
+                    transcodeRequired, duplicate, imported, songId, songFileId);
+            importRepo.saveAndFlush(existing);
+        }
+    }
+
+    private void applyRecordValues(MediaImportRecord record, Path source, String sourceMd5, Path output,
+                                   MediaProbe probe, String outputMd5, String action, String reason,
+                                   boolean transcodeRequired, boolean duplicate, boolean imported,
+                                   Long songId, Long songFileId) {
         ParsedMeta parsed = FilenameParser.parse(source.getFileName().toString());
         record.setSourcePath(source.toString());
         record.setSourceFilename(source.getFileName().toString());
@@ -443,7 +521,6 @@ public class MediaImportService {
         record.setSongId(songId);
         record.setSongFileId(songFileId);
         record.setSourceDeleted(false);
-        importRepo.save(record);
     }
 
     private void removeSourceRecord(MediaImportRecord record) {
@@ -590,6 +667,7 @@ public class MediaImportService {
 
     @PreDestroy
     void shutdown() {
+        scanExecutor.shutdownNow();
         transcodeExecutor.shutdownNow();
     }
 
