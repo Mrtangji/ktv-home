@@ -11,7 +11,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 concurrency:
@@ -110,3 +110,23 @@ jobs:
           name: home-ktv-tv-${{ env.RELEASE_VERSION }}-release-arm64-v8a
           path: android-tv/app/build/outputs/apk/release/*arm64-v8a*.apk
           if-no-files-found: error
+
+  github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: android-tv
+    steps:
+      - name: Download APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: home-ktv-tv-${{ env.RELEASE_VERSION }}-*
+          merge-multiple: true
+          path: release-assets
+      - name: Publish GitHub Release with APKs
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_VERSION }}
+          name: Home KTV ${{ env.RELEASE_VERSION }}
+          generate_release_notes: true
+          make_latest: true
+          files: release-assets/*.apk
