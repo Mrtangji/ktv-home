@@ -28,6 +28,7 @@ public class LibraryWatchService {
     private static final long DEBOUNCE_MS = 3000;
 
     private final AppProperties props;
+    private final SettingService settingService;
     private final LibraryScanService scanService;
     private final MediaImportService importService;
     private final WsBroadcaster broadcaster;
@@ -38,9 +39,11 @@ public class LibraryWatchService {
     private ScheduledFuture<?> pendingScan;
     private volatile boolean running;
 
-    public LibraryWatchService(AppProperties props, LibraryScanService scanService, MediaImportService importService,
+    public LibraryWatchService(AppProperties props, SettingService settingService,
+                               LibraryScanService scanService, MediaImportService importService,
                                WsBroadcaster broadcaster) {
         this.props = props;
+        this.settingService = settingService;
         this.scanService = scanService;
         this.importService = importService;
         this.broadcaster = broadcaster;
@@ -48,6 +51,21 @@ public class LibraryWatchService {
 
     @PostConstruct
     public void start() {
+        reloadFromSettings();
+    }
+
+    /** 应用系统设置中的自动扫描开关，保存设置后立即生效。 */
+    public synchronized void reloadFromSettings() {
+        if (!settingService.isLibraryWatchEnabled()) {
+            log.info("源目录自动监听已关闭，仅支持手动扫描");
+            stopWatching();
+            return;
+        }
+        startWatching();
+    }
+
+    private synchronized void startWatching() {
+        if (running) return;
         Path root = Path.of(props.getSourceLibraryPath());
         if (!Files.isDirectory(root)) {
             log.warn("曲库目录不存在，跳过自动监听：{}", root);
@@ -127,9 +145,18 @@ public class LibraryWatchService {
 
     @PreDestroy
     public void stop() {
+        stopWatching();
+    }
+
+    private synchronized void stopWatching() {
         running = false;
+        if (pendingScan != null) pendingScan.cancel(false);
+        pendingScan = null;
         try { if (watchService != null) watchService.close(); } catch (IOException ignored) {}
         if (watchExecutor != null) watchExecutor.shutdownNow();
         if (debounceExecutor != null) debounceExecutor.shutdownNow();
+        watchService = null;
+        watchExecutor = null;
+        debounceExecutor = null;
     }
 }

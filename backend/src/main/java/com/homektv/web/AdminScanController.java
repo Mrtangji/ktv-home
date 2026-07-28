@@ -2,6 +2,7 @@ package com.homektv.web;
 
 import com.homektv.library.AdminService;
 import com.homektv.library.LibraryScanService;
+import com.homektv.library.LibraryWatchService;
 import com.homektv.library.MediaImportService;
 import com.homektv.library.SettingService;
 import com.homektv.library.TranscodeService;
@@ -29,6 +30,7 @@ import java.util.Map;
 public class AdminScanController {
 
     private final LibraryScanService scanService;
+    private final LibraryWatchService libraryWatchService;
     private final AdminService adminService;
     private final MediaImportService mediaImportService;
     private final SettingService settingService;
@@ -36,11 +38,13 @@ public class AdminScanController {
     private final TranscodeHardwareService transcodeHardwareService;
     private final SongReparseService reparseService;
 
-    public AdminScanController(LibraryScanService scanService, AdminService adminService,
+    public AdminScanController(LibraryScanService scanService, LibraryWatchService libraryWatchService,
+                               AdminService adminService,
                                MediaImportService mediaImportService,
                                SettingService settingService, TranscodeService transcodeService,
                                TranscodeHardwareService transcodeHardwareService, SongReparseService reparseService) {
         this.scanService = scanService;
+        this.libraryWatchService = libraryWatchService;
         this.adminService = adminService;
         this.mediaImportService = mediaImportService;
         this.settingService = settingService;
@@ -221,6 +225,7 @@ public class AdminScanController {
             transcodeHardwareService.requireAvailable(codec);
         }
         settingService.putAll(settings);
+        libraryWatchService.reloadFromSettings();
         return settingService.getAll();
     }
 

@@ -17,6 +17,8 @@ import java.util.Set;
 @Service
 public class SettingService {
 
+    public static final String LIBRARY_WATCH_ENABLED = "library_watch_enabled";
+
     public static final Map<String, Object> TRANSCODE_DEFAULTS = Map.of(
             "direct_copy_containers", List.of("mp4", "m4v", "mkv"),
             "direct_copy_video_codecs", List.of("h264", "hevc"),
@@ -42,11 +44,16 @@ public class SettingService {
     @Transactional(readOnly = true)
     public Map<String, Object> getAll() {
         Map<String, Object> out = new HashMap<>(TRANSCODE_DEFAULTS);
+        out.put(LIBRARY_WATCH_ENABLED, false);
         out.put("tv_video_scale_mode", "zoom");
         for (Setting s : repo.findAll()) {
             out.put(s.getKey(), parse(s.getValue()));
         }
         return out;
+    }
+
+    public boolean isLibraryWatchEnabled() {
+        return Boolean.TRUE.equals(getAll().get(LIBRARY_WATCH_ENABLED));
     }
 
     /** 批量写入设置 */
