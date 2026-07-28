@@ -53,6 +53,15 @@ android {
         }
     }
 
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a")
+            isUniversalApk = false
+        }
+    }
+
     buildFeatures {
         viewBinding = true
     }
@@ -65,6 +74,30 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+}
+
+val validateReleaseSigning = tasks.register("validateReleaseSigning") {
+    doLast {
+        val signingMissing = listOf(
+            "KTV_TV_KEYSTORE",
+            "KTV_TV_STORE_PASSWORD",
+            "KTV_TV_KEY_ALIAS",
+            "KTV_TV_KEY_PASSWORD"
+        ).any { name -> providers.environmentVariable(name).orNull.isNullOrBlank() }
+
+        if (signingMissing) {
+            throw GradleException(
+                "Release APK requires KTV_TV_KEYSTORE, KTV_TV_STORE_PASSWORD, " +
+                    "KTV_TV_KEY_ALIAS, and KTV_TV_KEY_PASSWORD."
+            )
+        }
+    }
+}
+
+tasks.matching { task ->
+    task.name.startsWith("assemble") && task.name.contains("Release")
+}.configureEach {
+    dependsOn(validateReleaseSigning)
 }
 
 dependencies {

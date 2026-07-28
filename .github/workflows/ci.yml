@@ -69,8 +69,15 @@ jobs:
         run: echo "9feed2a29f7717955f579eff0373503ef3f8681734b053797fbda3cf62b3a5ab  app/libs/media3-decoder-ffmpeg.aar" | sha256sum -c -
       - name: Run TV tests and build APK
         run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
-      - uses: actions/upload-artifact@v4
+      - name: Upload 32-bit TV debug APK
+        uses: actions/upload-artifact@v4
         with:
-          name: home-ktv-tv-debug
-          path: android-tv/app/build/outputs/apk/debug/app-debug.apk
+          name: home-ktv-tv-debug-armeabi-v7a
+          path: android-tv/app/build/outputs/apk/debug/*armeabi-v7a*.apk
+          if-no-files-found: error
+      - name: Upload 64-bit TV debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: home-ktv-tv-debug-arm64-v8a
+          path: android-tv/app/build/outputs/apk/debug/*arm64-v8a*.apk
           if-no-files-found: error
