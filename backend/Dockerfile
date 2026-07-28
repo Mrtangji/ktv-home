@@ -2,16 +2,28 @@
 
 ARG BASE_REGISTRY=docker.m.daocloud.io
 
-FROM ${BASE_REGISTRY}/library/node:20-alpine AS web-build
+# Frontend compilation is architecture-independent. Run it on the native
+# builder platform so multi-architecture builds do not execute npm under QEMU.
+FROM --platform=$BUILDPLATFORM ${BASE_REGISTRY}/library/node:20-alpine AS web-build
 WORKDIR /workspace
 COPY h5/package.json h5/package-lock.json ./h5/
-RUN cd h5 && npm ci --registry=https://registry.npmmirror.com
+RUN cd h5 \
+    && npm ci \
+      --registry=https://registry.npmmirror.com \
+      --no-audit \
+      --no-fund \
+      --fetch-timeout=120000 \
+      --fetch-retries=5 \
+      --fetch-retry-factor=2 \
+      --fetch-retry-mintimeout=1000 \
+      --fetch-retry-maxtimeout=30000
 COPY h5 ./h5
 RUN mkdir -p backend/src/main/resources/static/m \
     && cd h5 \
     && npm run build
 
-FROM ${BASE_REGISTRY}/library/maven:3.9-eclipse-temurin-21 AS build
+# The JAR is also architecture-independent; keep Maven on the native builder.
+FROM --platform=$BUILDPLATFORM ${BASE_REGISTRY}/library/maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /build
 COPY backend/pom.xml .
 COPY backend/src ./src
