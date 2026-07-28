@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 首次配置页：先自动扫描局域网，扫不到再手输（详设§12.1 改造） -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="@color/bg"
+    android:padding="48dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/setup_title"
+        android:textColor="@color/gold"
+        android:textSize="40sp"
+        android:textStyle="bold" />
+
+    <!-- 扫描状态行 -->
+    <TextView
+        android:id="@+id/txtScanStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="@string/setup_scanning"
+        android:textColor="@color/text"
+        android:textSize="20sp"
+        android:gravity="center" />
+
+    <ProgressBar
+        android:id="@+id/progressScan"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="520dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:max="254"
+        android:indeterminate="false" />
+
+    <!-- 手动输入区（扫不到时展开） -->
+    <TextView
+        android:id="@+id/txtManualHint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="28dp"
+        android:text="@string/setup_manual_hint"
+        android:textColor="@color/dim"
+        android:textSize="16sp"
+        android:visibility="gone" />
+
+    <EditText
+        android:id="@+id/inputHost"
+        android:layout_width="520dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:background="@color/panel"
+        android:hint="192.168.1.10:8080"
+        android:textColorHint="@color/dim2"
+        android:textColor="@color/text"
+        android:textSize="24sp"
+        android:padding="20dp"
+        android:inputType="textUri"
+        android:imeOptions="actionDone"
+        android:singleLine="true"
+        android:visibility="gone" />
+
+    <Button
+        android:id="@+id/btnConnect"
+        android:layout_width="520dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="@string/setup_connect"
+        android:textColor="@color/bg"
+        android:textStyle="bold"
+        android:textSize="22sp"
+        android:backgroundTint="@color/gold"
+        android:visibility="gone" />
+
+    <Button
+        android:id="@+id/btnRescan"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:paddingHorizontal="32dp"
+        android:text="@string/setup_rescan"
+        android:textColor="@color/gold"
+        android:textSize="18sp"
+        android:background="@android:color/transparent"
+        android:visibility="gone" />
+</LinearLayout>

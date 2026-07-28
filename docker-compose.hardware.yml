@@ -1,0 +1,4 @@
+services:
+  ktv:
+    devices:
+      - /dev/dri:/dev/dri

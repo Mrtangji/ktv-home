@@ -1,0 +1,47 @@
+<template>
+  <div class="page">
+    <header class="top"><button @click="$router.back()">‹</button><strong>分类浏览</strong><span></span></header>
+    <div class="tabs"><button v-for="item in tabs" :key="item.key" :class="{ on: tab === item.key }" @click="tab = item.key">{{ item.label }}</button></div>
+    <main>
+      <template v-if="tab === 'artists'">
+        <div class="letters"><button v-for="letter in availableLetters" :key="letter" :class="{ on: activeLetter === letter }" @click="activeLetter = letter">{{ letter }}</button></div>
+        <div v-if="loading" class="tip">加载中…</div>
+        <div v-else class="artist-list"><router-link v-for="artist in filteredArtists" :key="artist.name" :to="{ name:'artist', params:{ name:artist.name } }"><span class="avatar">{{ artist.name.slice(0,1) }}</span><span><strong>{{ artist.name }}</strong><small>{{ artist.songCount }} 首</small></span><em>›</em></router-link></div>
+      </template>
+      <template v-else>
+        <div v-if="loading" class="tip">加载中…</div>
+        <div v-else class="cards"><router-link v-for="item in currentItems" :key="item.name" :to="songLink(item)"><span>{{ iconFor(item.name) }}</span><strong>{{ item.name }}</strong><small>{{ item.songCount }} 首</small></router-link></div>
+      </template>
+    </main>
+    <TabBar active="home" />
+  </div>
+</template>
+
+<script setup>
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import api from '../api/client'
+import TabBar from '../components/TabBar.vue'
+
+const route = useRoute()
+const tabs = [{ key:'artists',label:'歌手' },{ key:'languages',label:'语种' },{ key:'tags',label:'分类' }]
+const tab = ref(route.query.tab || 'artists'), artists = ref([]), languages = ref([]), tags = ref([]), activeLetter = ref('热门'), loading = ref(true)
+onMounted(load); watch(tab, load)
+async function load() {
+  loading.value = true
+  try {
+    if (tab.value === 'artists' && !artists.value.length) artists.value = await api.browseArtists()
+    if (tab.value === 'languages' && !languages.value.length) languages.value = await api.browseLanguages()
+    if (tab.value === 'tags' && !tags.value.length) tags.value = await api.browseTags()
+  } finally { loading.value = false }
+}
+const availableLetters = computed(() => ['热门', ...[...new Set(artists.value.map(item => item.initial))].sort()])
+const filteredArtists = computed(() => activeLetter.value === '热门' ? artists.value.slice(0,30) : artists.value.filter(item => item.initial === activeLetter.value))
+const currentItems = computed(() => tab.value === 'languages' ? languages.value : tags.value)
+function songLink(item) { return { name:'artist', params:{ name:'all' }, query:{ mode:tab.value === 'languages' ? 'language' : 'tag', value:item.name } } }
+function iconFor(name) { if (/国语|粤语|英语|日语|韩语/.test(name)) return '🌏'; if (/儿歌|儿童/.test(name)) return '🧸'; if (/摇滚/.test(name)) return '🎸'; if (/情歌/.test(name)) return '💞'; return '🎶' }
+</script>
+
+<style scoped>
+.page{min-height:100vh;padding-bottom:74px}.top{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid var(--line)}.top button{border:0;background:none;color:var(--text);font-size:30px;width:35px}.top span{width:35px}.tabs{display:flex;padding:10px 16px 0;border-bottom:1px solid var(--line)}.tabs button{flex:1;border:0;background:none;color:var(--dim);padding:10px;border-bottom:2px solid transparent}.tabs button.on{color:var(--gold);border-color:var(--gold)}main{padding:13px 16px}.letters{display:flex;gap:6px;overflow-x:auto;padding-bottom:10px}.letters button{flex:none;border:1px solid var(--glass-border);background:var(--panel2);color:var(--dim);border-radius:8px;padding:5px 9px}.letters button.on{color:var(--gold);border-color:rgba(240,199,66,.3)}.artist-list{background:var(--panel2);border:1px solid var(--glass-border);border-radius:14px;padding:0 12px}.artist-list a{display:flex;align-items:center;gap:11px;padding:10px 0;border-bottom:1px solid var(--line);color:var(--text)}.artist-list a:last-child{border-bottom:0}.avatar{width:40px;height:40px;display:grid;place-items:center;border-radius:50%;background:var(--gold-glow);color:var(--gold);font-weight:800}.artist-list a>span:nth-child(2){display:flex;flex:1;flex-direction:column;gap:3px}.artist-list small{color:var(--dim2)}.artist-list em{font-style:normal;color:var(--dim2);font-size:22px}.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.cards a{display:flex;flex-direction:column;gap:6px;padding:16px;border:1px solid var(--glass-border);background:var(--panel2);border-radius:14px;color:var(--text)}.cards a>span{font-size:24px}.cards strong{font-size:14px}.cards small{color:var(--dim2)}.tip{text-align:center;color:var(--dim2);padding:50px}
+</style>

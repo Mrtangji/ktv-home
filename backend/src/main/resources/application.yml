@@ -1,0 +1,48 @@
+spring:
+  application:
+    name: home-ktv-server
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/ktv}
+    username: ${SPRING_DATASOURCE_USERNAME:ktv}
+    password: ${SPRING_DATASOURCE_PASSWORD:ktv}
+  jpa:
+    hibernate:
+      ddl-auto: validate          # 由 Flyway 建表，JPA 只校验映射
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+server:
+  port: ${SERVER_PORT:8080}
+
+# 应用自定义配置
+app:
+  source-library-path: ${KTV_SOURCE_LIBRARY_PATH:/source-music}
+  ktv-library-path: ${KTV_LIBRARY_PATH:/music}
+  data-path: ${KTV_DATA_PATH:./data}
+  ffprobe-path: ${KTV_FFPROBE_PATH:ffprobe}
+  transcode:
+    ffmpeg-path: ${KTV_FFMPEG_PATH:ffmpeg}
+    dri-path: ${KTV_DRI_PATH:/dev/dri}
+    drm-sys-path: ${KTV_DRM_SYS_PATH:/sys/class/drm}
+    rkmpp-device-path: ${KTV_RKMPP_DEVICE_PATH:/dev/mpp_service}
+  discovery:
+    enabled: ${KTV_DISCOVERY_ENABLED:true}
+    instance-name: ${KTV_DISCOVERY_NAME:家庭KTV}
+    udp-port: ${KTV_DISCOVERY_UDP_PORT:18888}
+  ai:
+    enabled: ${KTV_AI_ENABLED:false}
+    base-url: ${KTV_AI_BASE_URL:https://api.deepseek.com}
+    api-key: ${KTV_AI_API_KEY:}
+    model: ${KTV_AI_MODEL:deepseek-v4-flash}
+    auto-apply-confidence: ${KTV_AI_AUTO_APPLY_CONFIDENCE:0.90}
+    connect-timeout-seconds: 10
+    read-timeout-seconds: 60
+
+logging:
+  level:
+    com.homektv: INFO

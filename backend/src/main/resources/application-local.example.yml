@@ -1,0 +1,12 @@
+spring:
+  config:
+    activate:
+      on-profile: local
+
+app:
+  ai:
+    enabled: true
+    base-url: https://api.deepseek.com
+    api-key: 请替换为你的DeepSeek API Key
+    model: deepseek-v4-flash
+    auto-apply-confidence: 0.90

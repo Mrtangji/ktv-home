@@ -1,0 +1,4 @@
+services:
+  ktv:
+    devices:
+      - /dev/mpp_service:/dev/mpp_service

@@ -1,0 +1,598 @@
+package com.homektv.library;
+
+import com.homektv.config.AppProperties;
+import com.homektv.domain.MediaImportRecord;
+import com.homektv.domain.SongFile;
+import com.homektv.media.FFprobeService;
+import com.homektv.media.MediaProbe;
+import com.homektv.repo.MediaImportRecordRepository;
+import com.homektv.repo.SongFileRepository;
+import com.homektv.web.ApiException;
+import jakarta.annotation.PreDestroy;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.stereotype.Service;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.Collection;
+import java.util.Deque;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
+
+@Service
+public class MediaImportService {
+
+    public static final String PENDING_TRANSCODE = "PENDING_TRANSCODE";
+    public static final String COPIED = "COPIED";
+    public static final String TRANSCODED = "TRANSCODED";
+    public static final String UNRECOGNIZED = "UNRECOGNIZED";
+    public static final String FAILED = "FAILED";
+    public static final String SOURCE_DUPLICATE = "SKIPPED_SOURCE_MD5_DUPLICATE";
+    public static final String OUTPUT_DUPLICATE = "SKIPPED_OUTPUT_MD5_DUPLICATE";
+
+    private final AppProperties props;
+    private final FFprobeService ffprobeService;
+    private final FileHashService hashService;
+    private final MediaImportRecordRepository importRepo;
+    private final SongFileRepository songFileRepo;
+    private final LibraryScanService scanService;
+    private final SettingService settingService;
+    private final MediaTranscoder mediaTranscoder;
+    private final ExecutorService transcodeExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "source-library-transcode");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private final AtomicReference<TranscodeProgress> progress = new AtomicReference<>(TranscodeProgress.idle());
+    private final Object transcodeLock = new Object();
+    private final Deque<Long> transcodeQueue = new ArrayDeque<>();
+    private final LinkedHashSet<Long> priorityRecordIds = new LinkedHashSet<>();
+    private Long currentRecordId;
+
+    public MediaImportService(AppProperties props, FFprobeService ffprobeService, FileHashService hashService,
+                              MediaImportRecordRepository importRepo, SongFileRepository songFileRepo,
+                              LibraryScanService scanService, SettingService settingService,
+                              MediaTranscoder mediaTranscoder) {
+        this.props = props;
+        this.ffprobeService = ffprobeService;
+        this.hashService = hashService;
+        this.importRepo = importRepo;
+        this.songFileRepo = songFileRepo;
+        this.scanService = scanService;
+        this.settingService = settingService;
+        this.mediaTranscoder = mediaTranscoder;
+    }
+
+    public record SourceScanResult(int scanned, int copied, int pendingTranscode,
+                                   int skippedSourceDuplicate, int skippedOutputDuplicate,
+                                   int unrecognized, int failed) {}
+
+    public record TranscodeProgress(boolean running, int total, int completed, int transcoded,
+                                    int copiedSkipped, int skippedSourceDuplicate,
+                                    int skippedOutputDuplicate, int failed, String currentFile,
+                                    Long currentRecordId, List<Long> priorityRecordIds,
+                                    OffsetDateTime startedAt, OffsetDateTime finishedAt) {
+        static TranscodeProgress idle() {
+            return new TranscodeProgress(false, 0, 0, 0, 0, 0, 0, 0,
+                    null, null, List.of(), null, null);
+        }
+    }
+
+    public record PriorityResult(String status, Long recordId, TranscodeProgress progress) {}
+
+    public record DeleteSourcesResult(int requested, int deleted, int alreadyDeleted, int failed) {}
+
+    public record AutoCleanupResult(int scanned, int eligible, int deleted, int skipped, int failed) {}
+
+    public SourceScanResult scanSourceLibrary() {
+        Path sourceRoot = sourceRoot();
+        Path targetRoot = targetRoot();
+        ensureDirectories(sourceRoot, targetRoot);
+
+        List<Path> files = mediaFiles(sourceRoot);
+        int copied = 0, pending = 0, sourceDup = 0, outputDup = 0, unrecognized = 0, failed = 0;
+        for (Path source : files) {
+            try {
+                ScanOutcome outcome = analyzeAndMaybeCopy(source, targetRoot);
+                switch (outcome) {
+                    case COPIED -> copied++;
+                    case PENDING -> pending++;
+                    case SOURCE_DUPLICATE -> sourceDup++;
+                    case OUTPUT_DUPLICATE -> outputDup++;
+                    case UNRECOGNIZED -> unrecognized++;
+                    case UNCHANGED -> { }
+                }
+            } catch (Exception e) {
+                failed++;
+                upsertRecord(source, null, null, null, null, FAILED, messageOf(e), false,
+                        false, false, null, null);
+            }
+        }
+        return new SourceScanResult(files.size(), copied, pending, sourceDup, outputDup, unrecognized, failed);
+    }
+
+    public Page<MediaImportRecord> listSourceLibrary(String keyword, String status, String formatAnalysis,
+                                                     Boolean sourceDeleted, int page, int size) {
+        List<MediaImportRecord> filtered = filterSourceLibrary(keyword, status, formatAnalysis, sourceDeleted);
+        int safeSize = Math.max(1, Math.min(size, 200));
+        int safePage = Math.max(0, page);
+        int from = Math.min(safePage * safeSize, filtered.size());
+        int to = Math.min(from + safeSize, filtered.size());
+        return new PageImpl<>(filtered.subList(from, to), PageRequest.of(safePage, safeSize), filtered.size());
+    }
+
+    private List<MediaImportRecord> filterSourceLibrary(String keyword, String status, String formatAnalysis,
+                                                        Boolean sourceDeleted) {
+        purgeMissingSourceRecords();
+        String normalizedKeyword = lower(keyword);
+        return importRepo.findAllByOrderByCreatedAtDesc().stream()
+                .filter(record -> normalizedKeyword.isBlank()
+                        || lower(record.getSourceFilename()).contains(normalizedKeyword)
+                        || lower(record.getParsedTitle()).contains(normalizedKeyword)
+                        || lower(record.getParsedArtist()).contains(normalizedKeyword))
+                .filter(record -> matchesStatus(record, status))
+                .filter(record -> matchesFormat(record, formatAnalysis))
+                .filter(record -> sourceDeleted == null || record.isSourceDeleted() == sourceDeleted)
+                .toList();
+    }
+
+    public TranscodeProgress startPendingTranscode(Collection<Long> recordIds, boolean all) {
+        if (!all && (recordIds == null || recordIds.isEmpty())) {
+            throw new ApiException("TRANSCODE_SELECTION_REQUIRED", "请先选择需要转码的源文件");
+        }
+        List<MediaImportRecord> records = all
+                ? importRepo.findAllByOrderByCreatedAtDesc()
+                : importRepo.findByIdIn(recordIds);
+        List<MediaImportRecord> candidates = records.stream()
+                .filter(this::isTranscodable)
+                .toList();
+        synchronized (transcodeLock) {
+            if (progress.get().running()) {
+                throw new ApiException("TRANSCODE_ALREADY_RUNNING", "已有批量转码任务正在执行");
+            }
+            transcodeQueue.clear();
+            priorityRecordIds.clear();
+            currentRecordId = null;
+            candidates.stream().map(MediaImportRecord::getId).forEach(transcodeQueue::addLast);
+            boolean running = !transcodeQueue.isEmpty();
+            TranscodeProgress initial = new TranscodeProgress(running, candidates.size(), 0, 0, 0, 0, 0, 0,
+                    null, null, List.of(), OffsetDateTime.now(), running ? null : OffsetDateTime.now());
+            progress.set(initial);
+            if (running) transcodeExecutor.submit(this::runTranscodeQueue);
+            return initial;
+        }
+    }
+
+    public PriorityResult prioritizeTranscode(Long recordId) {
+        if (recordId == null) throw new ApiException("TRANSCODE_SELECTION_REQUIRED", "请选择需要插队的源文件");
+        MediaImportRecord record = importRepo.findById(recordId)
+                .orElseThrow(() -> new ApiException("IMPORT_RECORD_NOT_FOUND", "源素材记录不存在"));
+        if (!isTranscodable(record)) {
+            throw new ApiException("SOURCE_NOT_TRANSCODABLE", "该源文件当前不可转码");
+        }
+        synchronized (transcodeLock) {
+            TranscodeProgress current = progress.get();
+            if (!current.running()) {
+                throw new ApiException("TRANSCODE_NOT_RUNNING", "当前没有正在运行的转码任务");
+            }
+            if (Objects.equals(currentRecordId, recordId)) {
+                return new PriorityResult("CURRENT", recordId, current);
+            }
+            if (priorityRecordIds.contains(recordId)) {
+                return new PriorityResult("ALREADY_PRIORITY", recordId, current);
+            }
+            boolean moved = transcodeQueue.remove(recordId);
+            transcodeQueue.addFirst(recordId);
+            priorityRecordIds.add(recordId);
+            TranscodeProgress updated = copyProgress(current, current.total() + (moved ? 0 : 1),
+                    current.completed(), current.transcoded(), current.copiedSkipped(),
+                    current.skippedSourceDuplicate(), current.skippedOutputDuplicate(), current.failed(),
+                    current.currentFile(), current.currentRecordId(), List.copyOf(priorityRecordIds), true, null);
+            progress.set(updated);
+            return new PriorityResult(moved ? "MOVED" : "QUEUED", recordId, updated);
+        }
+    }
+
+    public TranscodeProgress getProgress() {
+        return progress.get();
+    }
+
+    public DeleteSourcesResult deleteSources(Collection<Long> ids) {
+        List<MediaImportRecord> records = ids == null || ids.isEmpty()
+                ? List.of()
+                : importRepo.findByIdIn(ids);
+        int deleted = 0, alreadyDeleted = 0, failed = 0;
+        for (MediaImportRecord record : records) {
+            if (record.isSourceDeleted()) {
+                alreadyDeleted++;
+                continue;
+            }
+            try {
+                Path source = Path.of(record.getSourcePath()).toAbsolutePath().normalize();
+                if (!source.startsWith(sourceRoot())) {
+                    throw new IOException("拒绝删除扫描源目录以外的文件：" + source);
+                }
+                Files.deleteIfExists(source);
+                removeSourceRecord(record);
+                deleted++;
+            } catch (IOException e) {
+                failed++;
+            }
+        }
+        return new DeleteSourcesResult(records.size(), deleted, alreadyDeleted, failed);
+    }
+
+    public AutoCleanupResult cleanupImportedSources() {
+        synchronized (transcodeLock) {
+            if (progress.get().running()) {
+                throw new ApiException("TRANSCODE_ALREADY_RUNNING", "批量转码进行中，暂时不能清理源文件");
+            }
+        }
+        List<MediaImportRecord> records = importRepo.findAllByOrderByCreatedAtDesc();
+        int eligible = 0, deleted = 0, skipped = 0, failed = 0;
+        for (MediaImportRecord record : records) {
+            if (!isSafelyImported(record)) {
+                skipped++;
+                continue;
+            }
+            eligible++;
+            try {
+                Files.delete(Path.of(record.getSourcePath()).toAbsolutePath().normalize());
+                removeSourceRecord(record);
+                deleted++;
+            } catch (IOException e) {
+                failed++;
+            }
+        }
+        return new AutoCleanupResult(records.size(), eligible, deleted, skipped, failed);
+    }
+
+    private boolean isSafelyImported(MediaImportRecord record) {
+        if (!record.isImportedFlag() || record.isSourceDeleted()
+                || record.getSongFileId() == null || record.getOutputPath() == null) return false;
+        Path source = Path.of(record.getSourcePath()).toAbsolutePath().normalize();
+        Path output = Path.of(record.getOutputPath()).toAbsolutePath().normalize();
+        if (!source.startsWith(sourceRoot()) || !output.startsWith(targetRoot()) || source.equals(output)
+                || !Files.isRegularFile(source) || !Files.isRegularFile(output)) return false;
+        return songFileRepo.findById(record.getSongFileId())
+                .filter(SongFile::isValid)
+                .map(file -> Path.of(file.getFilePath()).toAbsolutePath().normalize().equals(output))
+                .orElse(false);
+    }
+
+    public DeleteSourcesResult deleteSourcesByFilter(String keyword, String status, String formatAnalysis,
+                                                     Boolean sourceDeleted) {
+        List<Long> ids = filterSourceLibrary(keyword, status, formatAnalysis, sourceDeleted).stream()
+                .map(MediaImportRecord::getId)
+                .toList();
+        return deleteSources(ids);
+    }
+
+    public void deleteSource(Long recordId) {
+        DeleteSourcesResult result = deleteSources(List.of(recordId));
+        if (result.requested() == 0) throw new ApiException("IMPORT_RECORD_NOT_FOUND", "源素材记录不存在");
+        if (result.failed() > 0) throw new ApiException("DELETE_SOURCE_FAILED", "删除源视频失败");
+    }
+
+    public Page<MediaImportRecord> listRecords(String action, int page, int size) {
+        return listSourceLibrary("", action, "", null, page, size);
+    }
+
+    private ScanOutcome analyzeAndMaybeCopy(Path source, Path targetRoot) throws IOException {
+        String sourceMd5 = hashService.md5(source);
+        MediaImportRecord existing = importRepo.findBySourcePath(source.toString()).orElse(null);
+        if (existing != null && Objects.equals(existing.getSourceMd5(), sourceMd5)
+                && (existing.isImportedFlag() || PENDING_TRANSCODE.equals(existing.getAction()))) {
+            return ScanOutcome.UNCHANGED;
+        }
+
+        MediaProbe probe = ffprobeService.probe(source);
+        ParsedMeta parsed = FilenameParser.parse(source.getFileName().toString());
+        boolean recognized = parsed.recognized();
+        boolean transcodeRequired = requiresTranscode(source, probe);
+        if (!recognized) {
+            upsertRecord(source, sourceMd5, null, probe, null, UNRECOGNIZED,
+                    "文件名无法识别歌名和歌手", transcodeRequired, false, false, null, null);
+            return ScanOutcome.UNRECOGNIZED;
+        }
+        if (isSourceDuplicate(source, sourceMd5)) {
+            upsertRecord(source, sourceMd5, null, probe, null, SOURCE_DUPLICATE,
+                    "源文件 MD5 已存在，跳过", transcodeRequired, true, false, null, null);
+            return ScanOutcome.SOURCE_DUPLICATE;
+        }
+        if (transcodeRequired) {
+            upsertRecord(source, sourceMd5, null, probe, null, PENDING_TRANSCODE,
+                    "格式不满足 Android TV 流畅播放要求，等待批量转码", true, false, false, null, null);
+            return ScanOutcome.PENDING;
+        }
+
+        Path output = copyToTarget(source, targetRoot);
+        String outputMd5 = hashService.md5(output);
+        if (isOutputDuplicate(source, outputMd5)) {
+            Files.deleteIfExists(output);
+            upsertRecord(source, sourceMd5, null, probe, outputMd5, OUTPUT_DUPLICATE,
+                    "复制后的 MD5 已存在，跳过", false, true, false, null, null);
+            return ScanOutcome.OUTPUT_DUPLICATE;
+        }
+        LibraryScanService.IngestResult ingest = scanService.ingestLibraryFile(output, source, sourceMd5, outputMd5, false);
+        upsertRecord(source, sourceMd5, output, probe, outputMd5, COPIED, "已自动复制入 KTV 曲库",
+                false, false, true, ingest.songId(), ingest.songFileId());
+        return ScanOutcome.COPIED;
+    }
+
+    private void runTranscodeQueue() {
+        while (true) {
+            MediaImportRecord record;
+            synchronized (transcodeLock) {
+                Long nextId = transcodeQueue.pollFirst();
+                if (nextId == null) {
+                    currentRecordId = null;
+                    priorityRecordIds.clear();
+                    TranscodeProgress current = progress.get();
+                    progress.set(copyProgress(current, current.total(), current.completed(), current.transcoded(),
+                            current.copiedSkipped(), current.skippedSourceDuplicate(), current.skippedOutputDuplicate(),
+                            current.failed(), null, null, List.of(), false, OffsetDateTime.now()));
+                    return;
+                }
+                currentRecordId = nextId;
+                priorityRecordIds.remove(nextId);
+                record = importRepo.findById(nextId).orElse(null);
+                TranscodeProgress current = progress.get();
+                progress.set(copyProgress(current, current.total(), current.completed(), current.transcoded(),
+                        current.copiedSkipped(), current.skippedSourceDuplicate(), current.skippedOutputDuplicate(),
+                        current.failed(), record == null ? String.valueOf(nextId) : record.getSourceFilename(),
+                        nextId, List.copyOf(priorityRecordIds), true, null));
+            }
+
+            TranscodeOutcome outcome = record == null ? TranscodeOutcome.FAILED : transcodeRecord(record);
+            synchronized (transcodeLock) {
+                TranscodeProgress current = progress.get();
+                currentRecordId = null;
+                progress.set(copyProgress(current, current.total(), current.completed() + 1,
+                        current.transcoded() + (outcome == TranscodeOutcome.TRANSCODED ? 1 : 0),
+                        current.copiedSkipped(),
+                        current.skippedSourceDuplicate() + (outcome == TranscodeOutcome.SOURCE_DUPLICATE ? 1 : 0),
+                        current.skippedOutputDuplicate() + (outcome == TranscodeOutcome.OUTPUT_DUPLICATE ? 1 : 0),
+                        current.failed() + (outcome == TranscodeOutcome.FAILED ? 1 : 0),
+                        null, null, List.copyOf(priorityRecordIds), true, null));
+            }
+        }
+    }
+
+    private TranscodeOutcome transcodeRecord(MediaImportRecord record) {
+        try {
+            if (record.isSourceDeleted() || !Files.isRegularFile(Path.of(record.getSourcePath()))) {
+                throw new ApiException("SOURCE_FILE_MISSING", "源文件不存在或已删除");
+            }
+            Path source = Path.of(record.getSourcePath());
+            String sourceMd5 = hashService.md5(source);
+            if (!Objects.equals(sourceMd5, record.getSourceMd5()) || isSourceDuplicate(source, sourceMd5)) {
+                record.setAction(SOURCE_DUPLICATE);
+                record.setDuplicateFlag(true);
+                record.setReason("源文件 MD5 已存在或扫描后发生变化，跳过");
+                importRepo.save(record);
+                return TranscodeOutcome.SOURCE_DUPLICATE;
+            }
+            MediaProbe probe = ffprobeService.probe(source);
+            Path output = transcodeToTarget(source, targetRoot(), probe);
+            String outputMd5 = hashService.md5(output);
+            if (isOutputDuplicate(source, outputMd5)) {
+                Files.deleteIfExists(output);
+                record.setAction(OUTPUT_DUPLICATE);
+                record.setDuplicateFlag(true);
+                record.setOutputMd5(outputMd5);
+                record.setReason("转码后的 MD5 已存在，跳过");
+                importRepo.save(record);
+                return TranscodeOutcome.OUTPUT_DUPLICATE;
+            }
+            LibraryScanService.IngestResult ingest = scanService.ingestLibraryFile(
+                    output, source, sourceMd5, outputMd5, true);
+            upsertRecord(source, sourceMd5, output, probe, outputMd5, TRANSCODED,
+                    "已转码入 KTV 曲库", true, false, true, ingest.songId(), ingest.songFileId());
+            return TranscodeOutcome.TRANSCODED;
+        } catch (Exception e) {
+            record.setAction(FAILED);
+            record.setReason(messageOf(e));
+            importRepo.save(record);
+            return TranscodeOutcome.FAILED;
+        }
+    }
+
+    private TranscodeProgress copyProgress(TranscodeProgress current, int total, int completed, int transcoded,
+                                           int copiedSkipped, int sourceDup, int outputDup, int failed,
+                                           String currentFile, Long activeRecordId, List<Long> priorityIds,
+                                           boolean running, OffsetDateTime finishedAt) {
+        return new TranscodeProgress(running, total, completed, transcoded, copiedSkipped, sourceDup, outputDup,
+                failed, currentFile, activeRecordId, priorityIds, current.startedAt(), finishedAt);
+    }
+
+    private void upsertRecord(Path source, String sourceMd5, Path output, MediaProbe probe, String outputMd5,
+                              String action, String reason, boolean transcodeRequired, boolean duplicate,
+                              boolean imported, Long songId, Long songFileId) {
+        MediaImportRecord record = importRepo.findBySourcePath(source.toString()).orElseGet(MediaImportRecord::new);
+        ParsedMeta parsed = FilenameParser.parse(source.getFileName().toString());
+        record.setSourcePath(source.toString());
+        record.setSourceFilename(source.getFileName().toString());
+        record.setSourceMd5(sourceMd5 != null ? sourceMd5 : record.getSourceMd5() != null ? record.getSourceMd5() : "");
+        record.setParsedTitle(parsed.title());
+        record.setParsedArtist(parsed.artist());
+        record.setSourceFormat(extOf(source));
+        record.setMediaType(probe != null ? MediaClassifier.classify(probe) : record.getMediaType());
+        record.setOutputPath(output != null ? output.toString() : record.getOutputPath());
+        record.setOutputMd5(outputMd5);
+        record.setOutputFormat(output != null ? extOf(output) : record.getOutputFormat());
+        record.setVideoCodec(probe != null ? probe.videoCodec() : record.getVideoCodec());
+        record.setAudioCodec(probe != null ? probe.audioCodec() : record.getAudioCodec());
+        record.setAction(action);
+        record.setReason(reason);
+        record.setTranscodeRequired(transcodeRequired);
+        record.setDuplicateFlag(duplicate);
+        record.setImportedFlag(imported);
+        record.setSongId(songId);
+        record.setSongFileId(songFileId);
+        record.setSourceDeleted(false);
+        importRepo.save(record);
+    }
+
+    private void removeSourceRecord(MediaImportRecord record) {
+        if (record.getSongFileId() != null) {
+            songFileRepo.findById(record.getSongFileId()).ifPresent(file -> {
+                file.setSourceDeleted(true);
+                songFileRepo.save(file);
+            });
+        }
+        importRepo.delete(record);
+    }
+
+    private void purgeMissingSourceRecords() {
+        Path root = sourceRoot();
+        for (MediaImportRecord record : importRepo.findAllByOrderByCreatedAtDesc()) {
+            Path source = Path.of(record.getSourcePath()).toAbsolutePath().normalize();
+            if (source.startsWith(root) && (record.isSourceDeleted() || !Files.isRegularFile(source))) {
+                removeSourceRecord(record);
+            }
+        }
+    }
+
+    private boolean isSourceDuplicate(Path source, String sourceMd5) {
+        return songFileRepo.existsBySourceMd5(sourceMd5)
+                || importRepo.existsBySourceMd5AndSourcePathNot(sourceMd5, source.toString());
+    }
+
+    private boolean isOutputDuplicate(Path source, String outputMd5) {
+        return songFileRepo.existsByOutputMd5(outputMd5)
+                || importRepo.existsByOutputMd5AndSourcePathNot(outputMd5, source.toString());
+    }
+
+    private boolean isTranscodable(MediaImportRecord record) {
+        return record.isTranscodeRequired()
+                && (PENDING_TRANSCODE.equals(record.getAction()) || FAILED.equals(record.getAction()))
+                && !record.isSourceDeleted();
+    }
+
+    private static boolean matchesStatus(MediaImportRecord record, String status) {
+        if (status == null || status.isBlank()) return true;
+        return switch (status) {
+            case "duplicate" -> record.isDuplicateFlag();
+            case "pending" -> PENDING_TRANSCODE.equals(record.getAction());
+            case "copied" -> COPIED.equals(record.getAction());
+            case "transcoded" -> TRANSCODED.equals(record.getAction());
+            case "unrecognized" -> UNRECOGNIZED.equals(record.getAction());
+            case "failed" -> FAILED.equals(record.getAction());
+            case "deleted" -> record.isSourceDeleted();
+            default -> status.equals(record.getAction());
+        };
+    }
+
+    private static boolean matchesFormat(MediaImportRecord record, String formatAnalysis) {
+        if (formatAnalysis == null || formatAnalysis.isBlank()) return true;
+        return switch (formatAnalysis) {
+            case "transcode" -> record.isTranscodeRequired();
+            case "copy" -> !record.isTranscodeRequired();
+            default -> true;
+        };
+    }
+
+    private boolean requiresTranscode(Path source, MediaProbe probe) {
+        SettingService.TranscodePolicy policy = settingService.transcodePolicy();
+        String ext = extOf(source);
+        String videoCodec = lower(probe.videoCodec());
+        String audioCodec = lower(probe.audioCodec());
+        if (!probe.hasVideo()) return policy.transcodeAudioOnly();
+        return !policy.directCopyContainers().contains(ext)
+                || !policy.directCopyVideoCodecs().contains(videoCodec)
+                || !policy.directCopyAudioCodecs().contains(audioCodec);
+    }
+
+    private Path copyToTarget(Path source, Path targetRoot) throws IOException {
+        Path output = uniqueTarget(targetRoot.resolve(source.getFileName()));
+        Files.copy(source, output, StandardCopyOption.COPY_ATTRIBUTES);
+        return output;
+    }
+
+    private Path transcodeToTarget(Path source, Path targetRoot, MediaProbe probe) {
+        SettingService.TranscodePolicy policy = settingService.transcodePolicy();
+        String baseName = stripExtension(source.getFileName().toString());
+        Path output = uniqueTarget(targetRoot.resolve(baseName + "." + policy.outputContainer()));
+        return mediaTranscoder.transcode(source, output, policy, probe.hasVideo());
+    }
+
+    private Path uniqueTarget(Path desired) {
+        if (!Files.exists(desired)) return desired;
+        String base = stripExtension(desired.getFileName().toString());
+        String ext = extOf(desired);
+        for (int index = 2; index < 10000; index++) {
+            Path candidate = desired.getParent().resolve(base + "-" + index + (ext.isBlank() ? "" : "." + ext));
+            if (!Files.exists(candidate)) return candidate;
+        }
+        throw new ApiException("TARGET_NAME_EXHAUSTED", "无法为输出文件分配唯一文件名：" + desired);
+    }
+
+    private Path sourceRoot() {
+        return Path.of(props.getSourceLibraryPath()).toAbsolutePath().normalize();
+    }
+
+    private Path targetRoot() {
+        return Path.of(props.getKtvLibraryPath()).toAbsolutePath().normalize();
+    }
+
+    private static void ensureDirectories(Path sourceRoot, Path targetRoot) {
+        if (!Files.isDirectory(sourceRoot)) {
+            throw new ApiException("SOURCE_LIBRARY_MISSING", "扫描源目录不存在：" + sourceRoot);
+        }
+        try {
+            Files.createDirectories(targetRoot);
+        } catch (IOException e) {
+            throw new ApiException("KTV_LIBRARY_CREATE_FAILED", "无法创建 KTV 曲库目录：" + targetRoot);
+        }
+    }
+
+    private static List<Path> mediaFiles(Path root) {
+        List<Path> files = new ArrayList<>();
+        try (var stream = Files.walk(root)) {
+            stream.filter(Files::isRegularFile).filter(LibraryScanService::isMediaFile).forEach(files::add);
+        } catch (IOException e) {
+            throw new ApiException("SOURCE_SCAN_FAILED", "遍历扫描源目录失败：" + e.getMessage());
+        }
+        return files;
+    }
+
+    private static String extOf(Path file) {
+        String name = file.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        return dot > 0 ? name.substring(dot + 1).toLowerCase(Locale.ROOT) : "";
+    }
+
+    private static String stripExtension(String name) {
+        int dot = name.lastIndexOf('.');
+        return dot > 0 ? name.substring(0, dot) : name;
+    }
+
+    private static String lower(String value) {
+        return value == null ? "" : value.toLowerCase(Locale.ROOT);
+    }
+
+    private static String messageOf(Exception exception) {
+        return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
+    }
+
+    @PreDestroy
+    void shutdown() {
+        transcodeExecutor.shutdownNow();
+    }
+
+    private enum ScanOutcome { COPIED, PENDING, SOURCE_DUPLICATE, OUTPUT_DUPLICATE, UNRECOGNIZED, UNCHANGED }
+    private enum TranscodeOutcome { TRANSCODED, SOURCE_DUPLICATE, OUTPUT_DUPLICATE, FAILED }
+}
