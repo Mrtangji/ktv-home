@@ -65,6 +65,19 @@ has write access. Never point both directory variables at the same path.
 
 ### 2. Start the stack
 
+The recommended deployment pulls the multi-architecture image published by
+GitHub Actions and does not compile anything on the NAS or host:
+
+```bash
+docker compose -f docker-compose.prebuilt.yml up -d --pull always --wait
+```
+
+It uses `ghcr.io/zhayinggang/ktv-home:latest` by default. For production, set
+`KTV_RELEASE_IMAGE` in `.env` to a specific release tag so upgrades are
+explicit.
+
+To build from source instead, run:
+
 ```bash
 docker compose up -d --build --wait
 docker compose ps
