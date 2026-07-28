@@ -1,5 +1,14 @@
 # Home KTV
 
+**中文** | [English](README_EN.md)
+
+## 截图
+
+| 手机点歌端 | 电视播放端 | 曲库与服务仪表盘 |
+| --- | --- | --- |
+| ![手机点歌端](docs/images/mobile-songbook.png) | ![电视播放端](docs/images/tv-player.png) | ![管理仪表盘](docs/images/admin-dashboard.png) |
+| 在手机上浏览、搜索、收藏和点歌。 | 大屏播放、动态歌词与微信扫码点歌。 | 统一查看曲库、转码任务和播放服务状态。 |
+
 Home KTV 是一套运行在家庭 NAS 或 Linux 主机上的局域网点歌系统。电视负责播放，手机通过微信扫码进入点歌页，服务端管理曲库、队列、歌词、播放记录和系统设置。
 
 系统由三个客户端组成：
