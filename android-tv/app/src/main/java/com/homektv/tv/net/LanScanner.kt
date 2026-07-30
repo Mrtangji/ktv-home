@@ -10,6 +10,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.Inet4Address
 import java.net.NetworkInterface
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
@@ -29,29 +30,28 @@ class LanScanner {
         .retryOnConnectionFailure(false)
         .build()
 
-    /**
-     * 扫描本机所在 /24 网段的候选端口，返回第一个命中的 host:port。
-     * 未找到返回 null。按端口优先级分批探测，命中后不再扫描后续批次。
-     */
-    suspend fun scan(onProgress: ((scanned: Int, total: Int) -> Unit)? = null): String? =
+    /** 扫描本机所在 /24 网段的所有候选端口，并逐台报告命中。 */
+    suspend fun scanAll(
+        onProgress: ((scanned: Int, total: Int) -> Unit)? = null,
+        onFound: ((hostPort: String) -> Unit)? = null,
+    ): List<String> =
         coroutineScope {
-            val prefix = localSubnetPrefix() ?: return@coroutineScope null // 如 "192.168.1."
+            val prefix = localSubnetPrefix() ?: return@coroutineScope emptyList()
             val targets = scanTargets(prefix)
             val total = targets.size
             val counter = java.util.concurrent.atomic.AtomicInteger(0)
+            val found = ConcurrentHashMap.newKeySet<String>()
             for (batch in targets.chunked(MAX_CONCURRENT_PROBES)) {
-                val found = java.util.concurrent.atomic.AtomicReference<String?>(null)
                 batch.map { hostPort ->
                     async(Dispatchers.IO) {
-                    if (found.get() == null && validate(hostPort)) {
-                            found.compareAndSet(null, hostPort)
+                        if (validate(hostPort) && found.add(hostPort)) {
+                            onFound?.invoke(hostPort)
                         }
                         onProgress?.invoke(counter.incrementAndGet(), total)
                     }
                 }.awaitAll()
-                found.get()?.let { return@coroutineScope it }
             }
-            null
+            targets.filter(found::contains)
         }
 
     internal fun scanTargets(prefix: String): List<String> = CANDIDATE_PORTS.flatMap { port ->

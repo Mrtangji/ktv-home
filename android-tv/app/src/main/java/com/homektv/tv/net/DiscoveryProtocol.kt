@@ -4,6 +4,11 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+data class DiscoveredServer(
+    val hostPort: String,
+    val name: String,
+)
+
 object DiscoveryProtocol {
     const val SERVICE_TYPE = "_home-ktv._tcp."
     const val REQUEST = "HOME_KTV_DISCOVER_V1"
@@ -11,12 +16,15 @@ object DiscoveryProtocol {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun parseResponse(payload: String, sourceHost: String): String? = runCatching {
+    fun parseResponse(payload: String, sourceHost: String): DiscoveredServer? = runCatching {
         val root = json.parseToJsonElement(payload).jsonObject
         if (root["service"]?.jsonPrimitive?.content != "home-ktv") return null
         if (root["protocolVersion"]?.jsonPrimitive?.content?.toIntOrNull() != 1) return null
         val port = root["port"]?.jsonPrimitive?.content?.toIntOrNull()
             ?.takeIf { it in 1..65_535 } ?: return null
-        "$sourceHost:$port"
+        val name = root["name"]?.jsonPrimitive?.content?.trim()
+            ?.takeIf { it.isNotEmpty() } ?: sourceHost
+        val formattedHost = if (':' in sourceHost && !sourceHost.startsWith("[")) "[$sourceHost]" else sourceHost
+        DiscoveredServer("$formattedHost:$port", name)
     }.getOrNull()
 }

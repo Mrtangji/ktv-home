@@ -2,94 +2,139 @@ package com.homektv.tv.ui
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.children
+import androidx.core.view.descendants
 import androidx.lifecycle.lifecycleScope
 import com.homektv.tv.R
 import com.homektv.tv.databinding.ActivitySetupBinding
 import com.homektv.tv.net.AppConfig
+import com.homektv.tv.net.DiscoveredServer
 import com.homektv.tv.net.LanDiscovery
 import com.homektv.tv.net.LanScanner
+import com.homektv.tv.net.SavedServer
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-/**
- * 首次配置页（详设§12.1 改造）：
- * 进入即自动扫描局域网中的点歌服务（HTTP 子网探测），扫到直接连；
- * 扫不到再展开手输兜底。已配置则直接进 MainActivity。
- */
+/** TV 服务选择页：历史设备、按需扫描的局域网设备，以及手动输入。 */
 class SetupActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySetupBinding
     private lateinit var config: AppConfig
     private lateinit var discovery: LanDiscovery
     private val scanner = LanScanner()
+    private val discovered = linkedMapOf<String, DiscoveredServer>()
+    private var scanJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         config = AppConfig(this)
         discovery = LanDiscovery(this)
-
         binding = ActivitySetupBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        binding.btnRefresh.setOnClickListener { startScan() }
         binding.btnConnect.setOnClickListener { submitManual() }
-        binding.btnRescan.setOnClickListener { startScan() }
+        binding.inputHost.setOnEditorActionListener { _, _, _ ->
+            submitManual()
+            true
+        }
 
-        startScan()
+        renderHistory()
+        rebuildFocusChain()
+        binding.root.post { firstFocusableView()?.requestFocus() }
     }
 
-    /** 启动一次自动扫描；扫到即保存并进主界面，扫不到展开手输。 */
     private fun startScan() {
-        showScanning()
-        lifecycleScope.launch {
-            val host = discovery.discover(
-                savedHost = config.serverHost,
+        scanJob?.cancel()
+        discovered.clear()
+        binding.lanContainer.removeAllViews()
+        binding.txtLanEmpty.setText(R.string.setup_scanning)
+        binding.progressScan.apply {
+            isIndeterminate = true
+            visibility = View.VISIBLE
+        }
+        binding.txtScanStatus.setText(R.string.setup_scanning)
+        // Keep refresh enabled and focused while scanning so the DPAD focus never disappears.
+        binding.btnRefresh.requestFocus()
+
+        scanJob = lifecycleScope.launch {
+            val servers = discovery.discoverAll(
                 onStage = { stage -> runOnUiThread { showStage(stage) } },
                 onProgress = { scanned, total -> runOnUiThread {
+                    binding.progressScan.isIndeterminate = false
                     binding.progressScan.max = total
                     binding.progressScan.progress = scanned
                     binding.txtScanStatus.text = getString(R.string.setup_scan_progress, scanned, total)
                 } },
+                onDiscovered = { server -> runOnUiThread { addDiscoveredServer(server) } },
             )
-            if (host != null) {
-                binding.txtScanStatus.text = getString(R.string.setup_found, host)
-                config.serverHost = host
-                goMain()
-            } else {
-                showManualFallback()
-            }
+            binding.progressScan.visibility = View.GONE
+            binding.txtScanStatus.text = getString(R.string.setup_scan_done, servers.size)
+            binding.txtLanEmpty.visibility = if (servers.isEmpty()) View.VISIBLE else View.GONE
+            if (servers.isEmpty()) binding.txtLanEmpty.setText(R.string.setup_lan_empty)
+            rebuildFocusChain()
         }
     }
 
     private fun showStage(stage: LanDiscovery.Stage) {
-        binding.progressScan.visibility = if (stage == LanDiscovery.Stage.SUBNET) View.VISIBLE else View.GONE
+        binding.progressScan.isIndeterminate = stage != LanDiscovery.Stage.SUBNET
         binding.txtScanStatus.setText(when (stage) {
-            LanDiscovery.Stage.SAVED -> R.string.setup_checking_saved
             LanDiscovery.Stage.MDNS -> R.string.setup_discovering_mdns
             LanDiscovery.Stage.UDP -> R.string.setup_discovering_udp
             LanDiscovery.Stage.SUBNET -> R.string.setup_scanning
         })
     }
 
-    private fun showScanning() {
-        binding.txtScanStatus.text = getString(R.string.setup_scanning)
-        binding.progressScan.progress = 0
-        binding.progressScan.visibility = View.VISIBLE
-        binding.txtManualHint.visibility = View.GONE
-        binding.inputHost.visibility = View.GONE
-        binding.btnConnect.visibility = View.GONE
-        binding.btnRescan.visibility = View.GONE
+    private fun renderHistory() {
+        binding.historyContainer.removeAllViews()
+        config.savedServers.forEach(::addHistoryServer)
+        binding.txtHistoryEmpty.visibility =
+            if (config.savedServers.isEmpty()) View.VISIBLE else View.GONE
     }
 
-    private fun showManualFallback() {
-        binding.txtScanStatus.text = getString(R.string.setup_not_found)
-        binding.progressScan.visibility = View.GONE
-        binding.txtManualHint.visibility = View.VISIBLE
-        binding.inputHost.visibility = View.VISIBLE
-        binding.btnConnect.visibility = View.VISIBLE
-        binding.btnRescan.visibility = View.VISIBLE
-        binding.inputHost.requestFocus()
+    private fun addHistoryServer(server: SavedServer) {
+        val row = LayoutInflater.from(this).inflate(
+            R.layout.item_history_server, binding.historyContainer, false,
+        )
+        row.findViewById<TextView>(R.id.txtHistoryName).text = server.name
+        row.findViewById<TextView>(R.id.txtHistoryAddress).text = server.hostPort
+        row.findViewById<Button>(R.id.btnHistoryConnect).apply {
+            id = View.generateViewId()
+            setOnClickListener { connect(server) }
+        }
+        row.findViewById<Button>(R.id.btnHistoryDelete).apply {
+            id = View.generateViewId()
+            setOnClickListener {
+                config.removeSavedServer(server.hostPort)
+                renderHistory()
+                rebuildFocusChain()
+                binding.btnRefresh.requestFocus()
+            }
+        }
+        binding.historyContainer.addView(row)
+    }
+
+    private fun addDiscoveredServer(server: DiscoveredServer) {
+        if (discovered.putIfAbsent(server.hostPort, server) != null) return
+        binding.txtLanEmpty.visibility = View.GONE
+        val row = LayoutInflater.from(this).inflate(
+            R.layout.item_lan_server, binding.lanContainer, false,
+        )
+        row.findViewById<TextView>(R.id.txtLanName).text = server.name
+        row.findViewById<TextView>(R.id.txtLanAddress).text = server.hostPort
+        row.findViewById<Button>(R.id.btnLanConnect).apply {
+            id = View.generateViewId()
+            setOnClickListener { connect(SavedServer(server.hostPort, server.name)) }
+        }
+        binding.lanContainer.addView(row)
+        rebuildFocusChain()
     }
 
     private fun submitManual() {
@@ -98,24 +143,61 @@ class SetupActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.setup_empty, Toast.LENGTH_SHORT).show()
             return
         }
-        // 先探测 /api/health 确认是点歌服务端，校验通过才允许进入下一步
-        binding.btnConnect.isEnabled = false
-        binding.txtScanStatus.text = getString(R.string.setup_verifying, host)
+        verifyAndConnect(SavedServer(host, host), binding.btnConnect)
+    }
+
+    private fun connect(server: SavedServer) {
+        val focusedButton = currentFocus as? Button ?: binding.btnRefresh
+        verifyAndConnect(server, focusedButton)
+    }
+
+    private fun verifyAndConnect(server: SavedServer, button: Button) {
+        button.isEnabled = false
+        binding.txtScanStatus.text = getString(R.string.setup_verifying, server.hostPort)
         lifecycleScope.launch {
-            val reachable = scanner.validate(host)
-            if (reachable) {
-                config.serverHost = host
-                goMain()
+            if (scanner.validate(server.hostPort)) {
+                config.rememberServer(server)
+                startActivity(Intent(this@SetupActivity, MainActivity::class.java))
+                finish()
             } else {
-                binding.btnConnect.isEnabled = true
-                binding.txtScanStatus.text = getString(R.string.setup_not_found)
+                button.isEnabled = true
                 Toast.makeText(this@SetupActivity, R.string.setup_invalid, Toast.LENGTH_LONG).show()
+                binding.txtScanStatus.setText(R.string.setup_scan_idle)
+                button.requestFocus()
             }
         }
     }
 
-    private fun goMain() {
-        startActivity(Intent(this, MainActivity::class.java))
-        finish()
+    private fun rebuildFocusChain() {
+        val focusables = mutableListOf<View>()
+        binding.historyContainer.children.forEach { row ->
+            focusables += (row as ViewGroup).descendants.filterIsInstance<Button>().toList()
+        }
+        focusables += binding.btnRefresh
+        binding.lanContainer.children.forEach { row ->
+            focusables += (row as ViewGroup).descendants.filterIsInstance<Button>().toList()
+        }
+        focusables += binding.inputHost
+        focusables += binding.btnConnect
+
+        focusables.forEachIndexed { index, view ->
+            view.nextFocusUpId = focusables.getOrNull(index - 1)?.id ?: view.id
+            view.nextFocusDownId = focusables.getOrNull(index + 1)?.id ?: view.id
+            view.setOnFocusChangeListener { focused, hasFocus ->
+                if (hasFocus) scrollIntoView(focused)
+            }
+        }
+    }
+
+    private fun firstFocusableView(): View? =
+        binding.historyContainer.descendants.filterIsInstance<Button>().firstOrNull()
+            ?: binding.btnRefresh
+
+    private fun scrollIntoView(view: View) {
+        binding.setupScroll.post {
+            val rect = android.graphics.Rect()
+            view.getDrawingRect(rect)
+            view.requestRectangleOnScreen(rect, true)
+        }
     }
 }
