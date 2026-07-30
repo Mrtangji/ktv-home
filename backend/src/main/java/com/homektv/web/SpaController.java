@@ -16,6 +16,12 @@ import org.springframework.web.bind.annotation.GetMapping;
 @Controller
 public class SpaController {
 
+    /** 服务根路径直接进入管理后台。 */
+    @GetMapping("/")
+    public String root() {
+        return "redirect:/m/admin";
+    }
+
     /** 二维码入口 /m（无尾斜杠）。 */
     @GetMapping("/m")
     public String entry() {

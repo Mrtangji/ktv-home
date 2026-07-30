@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.C
@@ -33,6 +34,7 @@ import java.util.concurrent.TimeUnit
  *
  * 所有回调在主线程分发。
  */
+@OptIn(androidx.media3.common.util.UnstableApi::class)
 class PlaybackEngine(
     context: Context,
     private val onProgress: (positionMs: Long) -> Unit,
