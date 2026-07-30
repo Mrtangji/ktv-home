@@ -7,6 +7,9 @@ import android.net.wifi.WifiManager
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -14,44 +17,59 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.NetworkInterface
+import java.net.SocketTimeoutException
+import java.util.Collections
 
 class LanDiscovery(context: Context) {
-    enum class Stage { SAVED, MDNS, UDP, SUBNET }
+    enum class Stage { MDNS, UDP, SUBNET }
 
     private val appContext = context.applicationContext
     private val scanner = LanScanner()
 
-    suspend fun discover(
-        savedHost: String? = null,
+    suspend fun discoverAll(
         onStage: ((Stage) -> Unit)? = null,
         onProgress: ((Int, Int) -> Unit)? = null,
-    ): String? {
-        if (!savedHost.isNullOrBlank()) {
-            onStage?.invoke(Stage.SAVED)
-            if (scanner.validate(savedHost)) return savedHost
+        onDiscovered: ((DiscoveredServer) -> Unit)? = null,
+    ): List<DiscoveredServer> {
+        val found = linkedMapOf<String, DiscoveredServer>()
+
+        fun collect(server: DiscoveredServer) {
+            val isNew = synchronized(found) {
+                if (found.containsKey(server.hostPort)) false else {
+                    found[server.hostPort] = server
+                    true
+                }
+            }
+            if (isNew) onDiscovered?.invoke(server)
         }
+
         onStage?.invoke(Stage.MDNS)
-        discoverMdns()?.let { return it }
+        discoverMdns(::collect)
         onStage?.invoke(Stage.UDP)
-        discoverUdp()?.let { return it }
+        discoverUdp(::collect)
         onStage?.invoke(Stage.SUBNET)
-        return scanner.scan(onProgress)
+        scanner.scanAll(onProgress) { hostPort ->
+            collect(DiscoveredServer(hostPort, hostPort))
+        }
+        return synchronized(found) { found.values.toList() }
     }
 
-    private suspend fun discoverMdns(): String? {
+    private suspend fun discoverMdns(onFound: (DiscoveredServer) -> Unit): List<DiscoveredServer> =
+        coroutineScope {
         val nsd = appContext.getSystemService(Context.NSD_SERVICE) as NsdManager
         val wifi = appContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         val multicastLock = wifi?.createMulticastLock("home-ktv-discovery")?.apply {
             setReferenceCounted(false)
             acquire()
         }
-        val result = CompletableDeferred<String?>()
-        val scope = CoroutineScope(Dispatchers.IO)
+        val stopped = CompletableDeferred<Unit>()
+        val results = Collections.synchronizedMap(linkedMapOf<String, DiscoveredServer>())
+        val scope = CoroutineScope(coroutineContext)
         lateinit var listener: NsdManager.DiscoveryListener
         listener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(serviceType: String) = Unit
             override fun onDiscoveryStopped(serviceType: String) = Unit
-            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) { result.complete(null) }
+            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) { stopped.complete(Unit) }
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) = Unit
             override fun onServiceLost(serviceInfo: NsdServiceInfo) = Unit
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
@@ -61,28 +79,43 @@ class LanDiscovery(context: Context) {
                     override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = Unit
                     override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
                         val address = serviceInfo.host?.hostAddress ?: return
-                        val hostPort = "$address:${serviceInfo.port}"
+                        val formattedHost = if (':' in address) "[$address]" else address
+                        val server = DiscoveredServer(
+                            hostPort = "$formattedHost:${serviceInfo.port}",
+                            name = serviceInfo.serviceName.trim().ifEmpty { address },
+                        )
                         scope.launch {
-                            if (scanner.validate(hostPort)) result.complete(hostPort)
+                            if (scanner.validate(server.hostPort)) {
+                                val isNew = synchronized(results) {
+                                    if (results.containsKey(server.hostPort)) false else {
+                                        results[server.hostPort] = server
+                                        true
+                                    }
+                                }
+                                if (isNew) onFound(server)
+                            }
                         }
                     }
                 })
             }
         }
-        return try {
+        try {
             nsd.discoverServices(DiscoveryProtocol.SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
-            withTimeoutOrNull(MDNS_TIMEOUT_MS) { result.await() }
+            withTimeoutOrNull(MDNS_TIMEOUT_MS) { stopped.await() }
+            synchronized(results) { results.values.toList() }
         } catch (_: Exception) {
-            null
+            emptyList()
         } finally {
             runCatching { nsd.stopServiceDiscovery(listener) }
             if (multicastLock?.isHeld == true) multicastLock.release()
         }
     }
 
-    private suspend fun discoverUdp(): String? = withContext(Dispatchers.IO) {
-        withTimeoutOrNull(UDP_TIMEOUT_MS + 300L) {
-            runCatching {
+    private suspend fun discoverUdp(onFound: (DiscoveredServer) -> Unit): List<DiscoveredServer> =
+        coroutineScope {
+            val candidates = withContext(Dispatchers.IO) {
+                val received = linkedMapOf<String, DiscoveredServer>()
+                runCatching {
                 DatagramSocket().use { socket ->
                     socket.broadcast = true
                     socket.soTimeout = UDP_TIMEOUT_MS.toInt()
@@ -91,20 +124,29 @@ class LanDiscovery(context: Context) {
                         socket.send(DatagramPacket(payload, payload.size, address, DiscoveryProtocol.UDP_PORT))
                     }
                     val buffer = ByteArray(1_024)
-                    while (true) {
-                        val response = DatagramPacket(buffer, buffer.size)
-                        socket.receive(response)
-                        val hostPort = DiscoveryProtocol.parseResponse(
-                            response.data.decodeToString(response.offset, response.offset + response.length),
-                            response.address.hostAddress ?: continue,
-                        ) ?: continue
-                        if (scanner.validate(hostPort)) return@runCatching hostPort
+                    try {
+                        while (true) {
+                            val response = DatagramPacket(buffer, buffer.size)
+                            socket.receive(response)
+                            val server = DiscoveryProtocol.parseResponse(
+                                response.data.decodeToString(response.offset, response.offset + response.length),
+                                response.address.hostAddress ?: continue,
+                            ) ?: continue
+                            received[server.hostPort] = server
+                        }
+                    } catch (_: SocketTimeoutException) {
+                        // The receive window elapsed; validate everything collected below.
                     }
-                    null
                 }
-            }.getOrNull()
+                }.getOrNull()
+                received.values.toList()
+            }
+            candidates.map { server ->
+                async(Dispatchers.IO) {
+                    server.takeIf { scanner.validate(it.hostPort) }
+                }
+            }.awaitAll().filterNotNull().onEach(onFound)
         }
-    }
 
     private fun broadcastAddresses(): Set<InetAddress> {
         val addresses = linkedSetOf(InetAddress.getByName("255.255.255.255"))

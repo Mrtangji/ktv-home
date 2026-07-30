@@ -2,15 +2,21 @@ package com.homektv.tv.net
 
 import android.content.Context
 import androidx.core.content.edit
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
 
 /**
- * NAS 服务端地址持久化（详设§12.1 改造）。
- * 首选 [LanScanner] 局域网自动扫描落库，扫不到时回退手输；一经保存即固定。
+ * NAS 服务端地址与历史连接持久化。
  */
 class AppConfig(context: Context) {
 
     private val prefs = context.applicationContext
         .getSharedPreferences("ktv_tv", Context.MODE_PRIVATE)
+    private val json = Json { ignoreUnknownKeys = true }
+
+    init {
+        migrateLegacyServer()
+    }
 
     /** 形如 192.168.1.10:8080 的服务端 host:port（已归一化）。未配置时为 null。 */
     var serverHost: String?
@@ -18,6 +24,33 @@ class AppConfig(context: Context) {
         set(value) = prefs.edit { putString(KEY_HOST, value) }
 
     val isConfigured: Boolean get() = !serverHost.isNullOrBlank()
+
+    val savedServers: List<SavedServer>
+        get() = readSavedServers()
+
+    /** 连接成功后去重置顶，最多保留 10 台设备。 */
+    @Synchronized
+    fun rememberServer(server: SavedServer) {
+        val hostPort = normalizeHost(server.hostPort) ?: return
+        val existing = readSavedServers().firstOrNull { it.hostPort == hostPort }
+        val incomingName = server.name.trim()
+        val name = when {
+            incomingName.isNotEmpty() && incomingName != hostPort -> incomingName
+            existing != null -> existing.name
+            else -> hostPort
+        }
+        val updated = buildList {
+            add(SavedServer(hostPort, name))
+            addAll(readSavedServers().filterNot { it.hostPort == hostPort })
+        }.take(MAX_SAVED_SERVERS)
+        writeSavedServers(updated)
+        serverHost = hostPort
+    }
+
+    @Synchronized
+    fun removeSavedServer(hostPort: String) {
+        writeSavedServers(readSavedServers().filterNot { it.hostPort == hostPort })
+    }
 
     var microphoneMonitorEnabled: Boolean
         get() = prefs.getBoolean(KEY_MICROPHONE_MONITOR, true)
@@ -41,10 +74,33 @@ class AppConfig(context: Context) {
             t
         }
 
+    private fun migrateLegacyServer() {
+        if (prefs.contains(KEY_SAVED_SERVERS)) return
+        val legacyHost = prefs.getString(KEY_HOST, null)
+        val initial = legacyHost?.takeIf { it.isNotBlank() }
+            ?.let { listOf(SavedServer(it, it)) }
+            .orEmpty()
+        writeSavedServers(initial)
+    }
+
+    private fun readSavedServers(): List<SavedServer> {
+        val raw = prefs.getString(KEY_SAVED_SERVERS, null) ?: return emptyList()
+        return runCatching {
+            json.decodeFromString(ListSerializer(SavedServer.serializer()), raw)
+        }.getOrDefault(emptyList())
+    }
+
+    private fun writeSavedServers(servers: List<SavedServer>) {
+        val raw = json.encodeToString(ListSerializer(SavedServer.serializer()), servers)
+        prefs.edit { putString(KEY_SAVED_SERVERS, raw) }
+    }
+
     companion object {
         private const val KEY_HOST = "server_host"
         private const val KEY_TOKEN = "client_token"
         private const val KEY_MICROPHONE_MONITOR = "microphone_monitor_enabled"
+        private const val KEY_SAVED_SERVERS = "saved_servers"
+        private const val MAX_SAVED_SERVERS = 10
 
         /**
          * 归一化用户输入：去空格、剥离 http(s):// 前缀与尾部斜杠；

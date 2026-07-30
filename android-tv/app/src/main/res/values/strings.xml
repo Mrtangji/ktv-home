@@ -4,19 +4,24 @@
 
     <!-- 配置页 -->
     <string name="setup_title">连接点歌服务</string>
-    <string name="setup_hint">输入 NAS 地址（如 192.168.1.10 或 192.168.1.10:8080）</string>
     <string name="setup_connect">连接</string>
+    <string name="setup_delete">删除</string>
     <string name="setup_empty">请先输入 NAS 地址</string>
-    <!-- 局域网自动扫描 -->
+    <string name="setup_history_title">历史设备</string>
+    <string name="setup_history_empty">暂无历史设备</string>
+    <string name="setup_lan_title">局域网设备</string>
+    <string name="setup_refresh">刷新设备</string>
+    <string name="setup_scan_idle">点击刷新查找局域网中的点歌服务</string>
+    <string name="setup_lan_idle">尚未扫描</string>
+    <string name="setup_lan_empty">未发现局域网设备</string>
+    <string name="setup_manual_title">手动连接</string>
+    <string name="setup_host_example">192.168.1.10:8080</string>
     <string name="setup_scanning">正在扫描局域网中的点歌服务…</string>
-    <string name="setup_checking_saved">正在检查上次连接的服务…</string>
     <string name="setup_discovering_mdns">正在通过局域网标准服务发现查找…</string>
     <string name="setup_discovering_udp">正在广播查找家庭 KTV 服务…</string>
     <string name="setup_scan_progress">正在扫描局域网…（%1$d/%2$d）</string>
-    <string name="setup_found">已找到服务：%1$s</string>
-    <string name="setup_not_found">未扫描到服务，请手动输入地址</string>
-    <string name="setup_rescan">重新扫描</string>
-    <string name="setup_manual_hint">或手动输入地址和端口（支持任意端口）</string>
+    <string name="setup_scan_done">扫描完成，共发现 %1$d 台设备</string>
+    <string name="setup_manual_hint">输入服务地址和端口（支持任意端口）</string>
     <string name="setup_verifying">正在验证 %1$s …</string>
     <string name="setup_invalid">无法连接到点歌服务，请确认地址正确且服务已启动</string>
 

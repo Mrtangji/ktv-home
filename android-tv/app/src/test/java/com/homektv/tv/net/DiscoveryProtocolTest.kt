@@ -8,7 +8,10 @@ class DiscoveryProtocolTest {
     @Test
     fun parsesValidDiscoveryResponseUsingPacketSourceAddress() {
         val payload = """{"service":"home-ktv","protocolVersion":1,"name":"客厅KTV","port":12345}"""
-        assertEquals("192.168.1.20:12345", DiscoveryProtocol.parseResponse(payload, "192.168.1.20"))
+        assertEquals(
+            DiscoveredServer("192.168.1.20:12345", "客厅KTV"),
+            DiscoveryProtocol.parseResponse(payload, "192.168.1.20"),
+        )
     }
 
     @Test
