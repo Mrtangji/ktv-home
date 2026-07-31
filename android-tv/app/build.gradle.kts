@@ -6,6 +6,8 @@ plugins {
 
 val media3 = "1.4.1"
 val ffmpegAar = layout.projectDirectory.file("libs/media3-decoder-ffmpeg.aar").asFile
+val tvVersionName = providers.environmentVariable("KTV_TV_VERSION_NAME")
+    .orElse("0.1.0")
 
 if (!ffmpegAar.isFile) {
     throw GradleException(
@@ -20,10 +22,10 @@ android {
 
     defaultConfig {
         applicationId = "com.homektv.tv"
-        minSdk = 29          // Android 10（PRD§9：TV 兼容 Android 10+）
+        minSdk = 26          // Android 8.0+；高版本能力由运行时 API 分支保留
         targetSdk = 35
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = tvVersionName.get()
     }
 
     val releaseKeystore = providers.environmentVariable("KTV_TV_KEYSTORE").orNull

@@ -52,6 +52,8 @@ jobs:
   android-tv:
     name: TV tests and APK
     runs-on: ubuntu-latest
+    env:
+      KTV_TV_VERSION_NAME: 0.1.0-unstable.${{ github.run_number }}
     defaults:
       run:
         working-directory: android-tv
@@ -68,16 +70,16 @@ jobs:
       - name: Verify FFmpeg extension
         run: echo "9feed2a29f7717955f579eff0373503ef3f8681734b053797fbda3cf62b3a5ab  app/libs/media3-decoder-ffmpeg.aar" | sha256sum -c -
       - name: Run TV tests and build APK
-        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
       - name: Upload 32-bit TV debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: home-ktv-tv-debug-armeabi-v7a
+          name: home-ktv-tv-unstable-${{ github.run_number }}-debug-armeabi-v7a
           path: android-tv/app/build/outputs/apk/debug/*armeabi-v7a*.apk
           if-no-files-found: error
       - name: Upload 64-bit TV debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: home-ktv-tv-debug-arm64-v8a
+          name: home-ktv-tv-unstable-${{ github.run_number }}-debug-arm64-v8a
           path: android-tv/app/build/outputs/apk/debug/*arm64-v8a*.apk
           if-no-files-found: error

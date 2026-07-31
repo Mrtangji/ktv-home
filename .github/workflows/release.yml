@@ -9,6 +9,14 @@ on:
         description: Version tag to publish, for example v1.0.0
         required: true
         type: string
+      channel:
+        description: Release channel; manual unstable builds are prereleases
+        required: true
+        default: unstable
+        type: choice
+        options:
+          - unstable
+          - stable
 
 permissions:
   contents: write
@@ -20,12 +28,47 @@ concurrency:
 
 env:
   IMAGE_NAME: ghcr.io/zhayinggang/ktv-home
-  RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
+  RAW_RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
 
 jobs:
+  release-meta:
+    name: Resolve release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      version_name: ${{ steps.meta.outputs.version_name }}
+      artifact_version: ${{ steps.meta.outputs.artifact_version }}
+      channel: ${{ steps.meta.outputs.channel }}
+      unstable: ${{ steps.meta.outputs.unstable }}
+    steps:
+      - name: Resolve stable or unstable version
+        id: meta
+        env:
+          RAW_VERSION: ${{ env.RAW_RELEASE_VERSION }}
+          REQUESTED_CHANNEL: ${{ inputs.channel || '' }}
+        run: |
+          set -euo pipefail
+          version="${RAW_VERSION#v}"
+          prefix=""
+          [[ "$RAW_VERSION" == v* ]] && prefix="v"
+
+          channel=stable
+          if [[ "$REQUESTED_CHANNEL" == "unstable" || "$version" == *-* ]]; then
+            channel=unstable
+            [[ "$version" == *-* ]] || version="${version}-unstable"
+          fi
+
+          release_tag="${prefix}${version}"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "version_name=$version" >> "$GITHUB_OUTPUT"
+          echo "artifact_version=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          [[ "$channel" == unstable ]] && echo "unstable=true" >> "$GITHUB_OUTPUT" || echo "unstable=false" >> "$GITHUB_OUTPUT"
+
   image:
     name: Publish multi-architecture image
     runs-on: ubuntu-latest
+    needs: release-meta
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -41,8 +84,9 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ env.RELEASE_VERSION }}
-            type=raw,value=latest
+            type=raw,value=${{ needs.release-meta.outputs.release_tag }}
+            type=raw,value=unstable,enable=${{ needs.release-meta.outputs.unstable == 'true' }}
+            type=raw,value=latest,enable=${{ needs.release-meta.outputs.unstable != 'true' }}
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -55,6 +99,9 @@ jobs:
   android-tv:
     name: Build TV APKs
     runs-on: ubuntu-latest
+    needs: release-meta
+    env:
+      KTV_TV_VERSION_NAME: ${{ needs.release-meta.outputs.version_name }}
     defaults:
       run:
         working-directory: android-tv
@@ -86,48 +133,49 @@ jobs:
           test -n "$KTV_TV_STORE_PASSWORD"
           test -n "$KTV_TV_KEY_ALIAS"
           test -n "$KTV_TV_KEY_PASSWORD"
-          ./gradlew --no-daemon testDebugUnitTest assembleDebug assembleRelease
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease
       - name: Upload 32-bit Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: home-ktv-tv-${{ env.RELEASE_VERSION }}-debug-armeabi-v7a
+          name: home-ktv-tv-${{ needs.release-meta.outputs.artifact_version }}-debug-armeabi-v7a
           path: android-tv/app/build/outputs/apk/debug/*armeabi-v7a*.apk
           if-no-files-found: error
       - name: Upload 64-bit Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: home-ktv-tv-${{ env.RELEASE_VERSION }}-debug-arm64-v8a
+          name: home-ktv-tv-${{ needs.release-meta.outputs.artifact_version }}-debug-arm64-v8a
           path: android-tv/app/build/outputs/apk/debug/*arm64-v8a*.apk
           if-no-files-found: error
       - name: Upload 32-bit Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: home-ktv-tv-${{ env.RELEASE_VERSION }}-release-armeabi-v7a
+          name: home-ktv-tv-${{ needs.release-meta.outputs.artifact_version }}-release-armeabi-v7a
           path: android-tv/app/build/outputs/apk/release/*armeabi-v7a*.apk
           if-no-files-found: error
       - name: Upload 64-bit Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: home-ktv-tv-${{ env.RELEASE_VERSION }}-release-arm64-v8a
+          name: home-ktv-tv-${{ needs.release-meta.outputs.artifact_version }}-release-arm64-v8a
           path: android-tv/app/build/outputs/apk/release/*arm64-v8a*.apk
           if-no-files-found: error
 
   github-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: android-tv
+    needs: [release-meta, android-tv]
     steps:
       - name: Download APK artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: home-ktv-tv-${{ env.RELEASE_VERSION }}-*
+          pattern: home-ktv-tv-${{ needs.release-meta.outputs.artifact_version }}-*
           merge-multiple: true
           path: release-assets
       - name: Publish GitHub Release with APKs
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.RELEASE_VERSION }}
-          name: Home KTV ${{ env.RELEASE_VERSION }}
+          tag_name: ${{ needs.release-meta.outputs.release_tag }}
+          name: Home KTV ${{ needs.release-meta.outputs.release_tag }} (${{ needs.release-meta.outputs.channel }})
           generate_release_notes: true
-          make_latest: true
+          prerelease: ${{ needs.release-meta.outputs.unstable == 'true' }}
+          make_latest: ${{ needs.release-meta.outputs.unstable != 'true' }}
           files: release-assets/*.apk

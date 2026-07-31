@@ -19,6 +19,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.FrameLayout
 import android.view.Gravity
+import androidx.annotation.OptIn
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -54,6 +55,7 @@ import kotlinx.coroutines.launch
  * 完整播放页 UI（双行歌词/信息条/进度条 TV-02/03）、双音轨切换（P1.29）、
  * 遥控浮层（TV-04/05）在后续任务叠加。
  */
+@OptIn(androidx.media3.common.util.UnstableApi::class)
 class MainActivity : AppCompatActivity(), KtvSocket.Listener {
 
     private lateinit var binding: ActivityMainBinding

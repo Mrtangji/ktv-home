@@ -41,7 +41,7 @@ real time.
 - A NAS, Linux host, or Docker Desktop installation with Docker Compose
 - At least 1 GB of available memory is recommended
 - Phone, Android TV, and server on the same LAN
-- Android TV 10 or later
+- Android TV 8.0 (API 26) or later
 
 ### 1. Configure storage and credentials
 
