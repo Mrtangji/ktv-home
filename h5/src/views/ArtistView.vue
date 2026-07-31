@@ -1,7 +1,10 @@
 <template>
   <div class="page">
+    <!-- 顶部导航栏 / Header navigation -->
     <header class="head"><button @click="$router.back()">‹</button><div><h1>{{ pageTitle }}</h1><p>{{ songs.length }} 首歌曲</p></div></header>
+    <!-- 排序标签页 / Sort tabs -->
     <div class="sorts"><button :class="{ on: sort === 'hot' }" @click="setSort('hot')">按热度</button><button :class="{ on: sort === 'title' }" @click="setSort('title')">按歌名</button><button :class="{ on: sort === 'new' }" @click="setSort('new')">最新</button></div>
+    <!-- 歌曲列表区域 / Song list area -->
     <main>
       <div v-if="loading" class="tip">加载中…</div><div v-else-if="!songs.length" class="tip">没有找到相关歌曲</div>
       <SongRow v-for="song in songs" :key="song.id" :song="song" :extra="fmtDur(song.durationMs)" :ordered="orderedIds.has(song.id)" @order="order" />
@@ -11,6 +14,14 @@
 </template>
 
 <script setup>
+/**
+ * 艺人/分类歌曲浏览页面。
+ * 支持按热度、歌名、最新排序，可按艺人、语种、标签、演唱形式等模式筛选。
+ *
+ * Artist/category song browse page.
+ * Supports sorting by hotness, title, or newest first, and filtering
+ * by artist, language, tag, vocal form, and other modes.
+ */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import api, { makeControls } from '../api/client'
@@ -20,11 +31,38 @@ import TabBar from '../components/TabBar.vue'
 import SongRow from '../components/SongRow.vue'
 
 const route = useRoute(), user = useUserStore(), { toast } = useToast(), controls = makeControls(user.clientToken)
-const songs = ref([]), loading = ref(true), sort = ref(route.query.sort || 'hot'), orderedIds = reactive(new Set())
+const songs = ref([]), loading = ref(true), sort = ref(route.query.sort || 'hot')
+// 已点歌曲 ID 集合，防止重复点歌 / Set of ordered song IDs to prevent duplicate ordering
+const orderedIds = reactive(new Set())
+
+/**
+ * 当前浏览模式。
+ * 可选值：all（全部）、artist（艺人）、language（语种）、tag（标签）、vocalForm（演唱形式）。
+ *
+ * Current browse mode.
+ * Possible values: all, artist, language, tag, vocalForm.
+ */
 const mode = computed(() => route.query.mode || (route.params.name === 'all' ? 'all' : 'artist'))
+
+/**
+ * 当前筛选值，如艺人名、语种名等。
+ *
+ * Current filter value, e.g. artist name, language name, etc.
+ */
 const value = computed(() => route.query.value || route.params.name || '')
+
+/**
+ * 页面标题，根据当前模式动态生成。
+ *
+ * Page title, dynamically generated based on the current mode.
+ */
 const pageTitle = computed(() => mode.value === 'all' ? '全部歌曲' : mode.value === 'language' ? `${value.value}歌曲` : mode.value === 'tag' ? value.value : mode.value === 'vocalForm' ? value.value : value.value)
 
+/**
+ * 加载歌曲列表。
+ *
+ * Load song list.
+ */
 async function load() {
   loading.value = true
   const params = { sort: sort.value, limit: 200 }
@@ -32,8 +70,27 @@ async function load() {
   try { songs.value = await api.browseSongs(params) } finally { loading.value = false }
 }
 onMounted(load); watch(() => route.fullPath, load)
+
+/**
+ * 切换排序方式并重新加载。
+ *
+ * @param {'hot' | 'title' | 'new'} value - 排序方式 / sort method
+ */
 function setSort(value) { sort.value = value; load() }
+
+/**
+ * 将歌曲加入播放队列。失败时弹出错误提示。
+ *
+ * @param {{ id: string }} song - 歌曲对象 / song object
+ */
 async function order(song) { try { await controls.order(song.id); orderedIds.add(song.id); toast('已加入队列') } catch (error) { toast(error.message || '点歌失败') } }
+
+/**
+ * 将毫秒时长格式化为 mm:ss 字符串。
+ *
+ * @param {number} ms - 毫秒 / milliseconds
+ * @returns {string} 格式化后的时长 / formatted duration string
+ */
 function fmtDur(ms) { if (!ms) return ''; const value = Math.round(ms / 1000); return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}` }
 </script>
 

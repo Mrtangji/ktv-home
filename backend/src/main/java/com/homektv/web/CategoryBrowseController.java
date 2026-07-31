@@ -7,6 +7,11 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 分类浏览控制器，提供按艺术家、语言、标签等维度浏览歌曲的 REST API。
+ *
+ * Category browse controller, providing REST APIs to browse songs by artist, language, tag, and other dimensions.
+ */
 @RestController
 @RequestMapping("/api/browse")
 public class CategoryBrowseController {
@@ -25,6 +30,19 @@ public class CategoryBrowseController {
     @GetMapping("/tags")
     public List<Map<String, Object>> tags() { return service.tags(); }
 
+    /**
+     * 按艺术家、语言、标签和演唱形式等条件筛选歌曲列表。
+     *
+     * Retrieves a filtered list of songs by artist, language, tag, and vocal form.
+     *
+     * @param artist   艺术家名称（可选）。Artist name (optional).
+     * @param language 语言（可选）。Language (optional).
+     * @param tag      标签（可选）。Tag (optional).
+     * @param vocalForm 演唱形式（可选）。Vocal form (optional).
+     * @param sort     排序方式，默认 "hot"。Sort order, defaults to "hot".
+     * @param limit    返回数量上限，默认 100。Maximum number of results, defaults to 100.
+     * @return 符合条件的歌曲列表。List of matching songs.
+     */
     @GetMapping("/songs")
     public List<SongDto> songs(@RequestParam(required = false) String artist,
                                @RequestParam(required = false) String language,

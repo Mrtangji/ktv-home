@@ -3,6 +3,7 @@
     <transition name="dialog-fade">
       <div v-if="state.open" class="dialog-mask" @click.self="close(false)">
         <section class="dialog-card" role="dialog" aria-modal="true" :aria-label="state.title">
+          <!-- 图标：根据色调切换 / Icon: switches by tone -->
           <div class="dialog-icon" :class="state.tone"><TriangleAlert v-if="state.tone === 'warning'" :size="22" /><CircleCheck v-else-if="state.tone === 'success'" :size="22" /><CircleAlert v-else :size="22" /></div>
           <div class="dialog-copy"><h2>{{ state.title }}</h2><p>{{ state.message }}</p></div>
           <button class="dialog-close" aria-label="关闭" @click="close(false)"><X :size="18" /></button>
@@ -17,11 +18,25 @@
 </template>
 
 <script setup>
+/**
+ * 全局对话框组件，通过 Teleport 渲染到 body，
+ * 支持确认（双按钮）/提示（单按钮）两种模式和 warning / success / error 三种色调。
+ *
+ * Global dialog component, rendered to body via Teleport.
+ * Supports confirm (dual-button) / alert (single-button) modes and
+ * warning / success / error tones.
+ */
 import { onMounted, onUnmounted } from 'vue'
 import { CircleAlert, CircleCheck, TriangleAlert, X } from 'lucide-vue-next'
 import { useDialog } from '../composables/useDialog'
 
 const { state, close } = useDialog()
+
+/**
+ * 按下 Escape 键时关闭对话框。
+ *
+ * Closes the dialog when the Escape key is pressed.
+ */
 const onKeydown = event => { if (event.key === 'Escape') close(false) }
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))

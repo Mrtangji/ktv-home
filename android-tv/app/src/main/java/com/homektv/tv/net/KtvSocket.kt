@@ -22,6 +22,8 @@ import java.util.concurrent.TimeUnit
  * - 上行 progress(1s) 与 finished（P1.15/P1.28 播放引擎调用）
  *
  * 所有回调在主线程分发，便于直接更新 UI。
+ *
+ * All callbacks are dispatched on the main thread so the UI can be updated directly.
  */
 class KtvSocket(
     private val config: AppConfig,

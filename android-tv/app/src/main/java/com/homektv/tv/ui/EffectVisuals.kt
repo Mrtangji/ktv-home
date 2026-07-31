@@ -1,7 +1,9 @@
 package com.homektv.tv.ui
 
+/** Supported visual effect categories. / 支持的视觉特效类别。 */
 enum class EffectVisualKind { CLAP, CHEER, BOO, TOAST }
 
+/** Visual effect configuration. / 视觉特效配置。 */
 data class EffectVisualSpec(
     val id: String,
     val kind: EffectVisualKind,
@@ -12,6 +14,7 @@ data class EffectVisualSpec(
     val colors: List<Long>,
 )
 
+/** Catalog and lookup helper for TV visual effects. / TV 视觉特效目录与查询工具。 */
 object EffectVisuals {
     private val specs = listOf(
         EffectVisualSpec("clap", EffectVisualKind.CLAP, "掌声响起来！", "👏", 1_900L, 42,
@@ -26,5 +29,10 @@ object EffectVisuals {
 
     val ids: Set<String> = specs.mapTo(linkedSetOf()) { it.id }
 
+    /**
+     * 按 ID 查找视觉特效配置，未知 ID 返回 null。
+     *
+     * Looks up a visual effect specification by ID and returns null when absent.
+     */
     fun find(effectId: String): EffectVisualSpec? = specs.firstOrNull { it.id == effectId.lowercase() }
 }

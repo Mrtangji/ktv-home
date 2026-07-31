@@ -8,6 +8,9 @@ import java.util.Map;
 
 /**
  * 点歌人注册/昵称（H5-01，详设§7）。局域网免登录，仅轻量标识。
+ *
+ * Song requester registration / nickname (H5-01, detailed design §7).
+ * LAN-based, login-free, lightweight identity only.
  */
 @RestController
 @RequestMapping("/api")
@@ -19,7 +22,15 @@ public class UserController {
         this.userService = userService;
     }
 
-    /** 提交昵称，返回去重后的最终昵称（P2.13 昵称冲突显序号） */
+    /**
+     * 提交昵称，返回去重后的最终昵称（P2.13 昵称冲突显序号）。
+     *
+     * Submits a nickname and returns the final deduplicated nickname
+     * (P2.13 nickname conflict appends a sequence number).
+     *
+     * @param body 请求体，含 client_token 和 nickname
+     * @return 包含用户 id 和最终 nickname 的 Map
+     */
     @PostMapping("/user")
     public Map<String, Object> register(@RequestBody Map<String, String> body) {
         String token = body.get("client_token");

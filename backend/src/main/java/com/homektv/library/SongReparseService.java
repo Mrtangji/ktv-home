@@ -62,6 +62,12 @@ public class SongReparseService {
             song.setTitleInit(PinyinUtil.initials(preview.proposedTitle()));
             song.setArtistPy(PinyinUtil.fullPinyin(preview.proposedArtist()));
             song.setArtistInit(PinyinUtil.initials(preview.proposedArtist()));
+            String fingerprint = MediaClassifier.fingerprint(preview.proposedArtist(), preview.proposedTitle(), song.getDurationMs());
+            songRepository.findByFingerprint(fingerprint).filter(other -> !other.getId().equals(song.getId()))
+                    .ifPresent(other -> { throw new ApiException("FINGERPRINT_CONFLICT", "重解析结果与歌曲 #" + other.getId() + " 重复"); });
+            song.setFingerprint(fingerprint);
+            song.lockMetadata("title");
+            song.lockMetadata("artist");
             song.setStatus("ok");
             songRepository.save(song);
             updated++;

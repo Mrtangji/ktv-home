@@ -7,11 +7,21 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 
+/**
+ * 音效播放器，使用 AudioTrack 在 TV 端异步播放预生成音效。
+ *
+ * Effect player that asynchronously plays generated sounds through AudioTrack on the TV.
+ */
 class EffectPlayer {
     private val main = Handler(Looper.getMainLooper())
     private val activeTracks = mutableSetOf<AudioTrack>()
     private var released = false
 
+    /**
+     * 按当前系统音量和静音状态播放指定音效。
+     *
+     * Plays an effect using the current player volume and mute state.
+     */
     fun play(effectId: String, playerVolume: Int, muted: Boolean) {
         if (released || muted || playerVolume <= 0) return
         val sound = EffectSounds.find(effectId) ?: run {

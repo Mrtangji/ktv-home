@@ -5,6 +5,11 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;
 
+/**
+ * 歌曲数据访问层，负责 {@link Song} 实体的数据库操作。
+ *
+ * Song data access layer, responsible for database operations on the {@link Song} entity.
+ */
 public interface SongRepository extends JpaRepository<Song, Long> {
 
     Optional<Song> findByFingerprint(String fingerprint);

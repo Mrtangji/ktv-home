@@ -17,6 +17,11 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
  * - 连接建立即推送 sync_full 全量快照
  * - 接收 TV 上行 progress → 转发广播给 H5（歌词/进度同步）
  * - 接收 ping → 回 pong（心跳）
+ *
+ * KTV WebSocket handler (P1.13/P1.15/P1.16, detailed design §4.1/§4.2).
+ * - Pushes a sync_full full snapshot upon connection establishment.
+ * - Receives progress messages from TV → broadcasts to H5 clients (lyrics/progress sync).
+ * - Receives ping → replies with pong (heartbeat).
  */
 @Component
 public class KtvWebSocketHandler extends TextWebSocketHandler {
@@ -39,6 +44,14 @@ public class KtvWebSocketHandler extends TextWebSocketHandler {
         this.mapper = mapper;
     }
 
+    /**
+     * 连接建立后注册会话并推送全量快照；若为 TV 端则触发上线监听。
+     *
+     * Registers the session and pushes a full snapshot upon connection
+     * establishment; triggers online watcher if the client is a TV.
+     *
+     * @param session WebSocket 会话 / WebSocket session
+     */
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         broadcaster.register(session);
@@ -50,6 +63,15 @@ public class KtvWebSocketHandler extends TextWebSocketHandler {
         log.debug("WS 连接建立: {}，当前在线 {}", session.getId(), broadcaster.sessionCount());
     }
 
+    /**
+     * 处理上行消息：ping/pong 心跳、TV 播放进度广播、曲目完成/播放错误切歌。
+     *
+     * Handles incoming messages: ping/pong heartbeat, TV playback progress
+     * broadcast, track finished / play-error skip and broadcast.
+     *
+     * @param session WebSocket 会话 / WebSocket session
+     * @param message 文本消息 / text message
+     */
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         JsonNode node = mapper.readTree(message.getPayload());
@@ -82,12 +104,30 @@ public class KtvWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    /**
+     * 连接关闭时注销会话；若为 TV 端则触发离线监听。
+     *
+     * Unregisters the session on close; triggers offline watcher if the
+     * client was a TV.
+     *
+     * @param session WebSocket 会话 / WebSocket session
+     * @param status  关闭状态 / close status
+     */
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         notifyOfflineIfTv(broadcaster.unregister(session));
         log.debug("WS 连接关闭: {}，剩余在线 {}", session.getId(), broadcaster.sessionCount());
     }
 
+    /**
+     * 传输异常时注销会话并记录日志；若为 TV 端则触发离线监听。
+     *
+     * Unregisters the session and logs the error on transport failure;
+     * triggers offline watcher if the client was a TV.
+     *
+     * @param session   WebSocket 会话 / WebSocket session
+     * @param exception 异常 / the exception
+     */
     @Override
     public void handleTransportError(WebSocketSession session, Throwable exception) {
         log.debug("WS 传输错误 {}: {}", session.getId(), exception.getMessage());

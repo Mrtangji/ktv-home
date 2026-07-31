@@ -20,6 +20,9 @@ import java.util.concurrent.TimeUnit
  * 这里按用户要求改为**主动 HTTP 子网探测**：不依赖组播/mDNS，
  * 对本机所在 /24 子网的常用部署端口逐个 GET /api/health，命中 service=home-ktv 即认定为服务端。
  * 优点：不受路由器组播/AP 隔离策略影响；缺点：仅覆盖 /24（家用够用）。
+ *
+ * Advantage: independent of multicast and AP-isolation policies. Limitation:
+ * it only covers a /24 subnet, which is sufficient for typical home networks.
  */
 class LanScanner {
 

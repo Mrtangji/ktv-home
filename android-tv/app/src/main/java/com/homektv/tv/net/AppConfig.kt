@@ -7,6 +7,8 @@ import kotlinx.serialization.json.Json
 
 /**
  * NAS 服务端地址与历史连接持久化。
+ *
+ * Persists the NAS server address and the history of successful connections.
  */
 class AppConfig(context: Context) {
 
@@ -28,7 +30,11 @@ class AppConfig(context: Context) {
     val savedServers: List<SavedServer>
         get() = readSavedServers()
 
-    /** 连接成功后去重置顶，最多保留 10 台设备。 */
+    /**
+     * 连接成功后去重置顶，最多保留 10 台设备。
+     *
+     * Deduplicates and promotes a successful connection, keeping at most 10 devices.
+     */
     @Synchronized
     fun rememberServer(server: SavedServer) {
         val hostPort = normalizeHost(server.hostPort) ?: return

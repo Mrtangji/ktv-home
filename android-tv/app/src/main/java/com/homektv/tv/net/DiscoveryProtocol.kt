@@ -4,11 +4,13 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+/** A server discovered on the local network. / 局域网中发现的服务端。 */
 data class DiscoveredServer(
     val hostPort: String,
     val name: String,
 )
 
+/** Wire constants and response parser for LAN discovery. / 局域网发现协议常量与响应解析器。 */
 object DiscoveryProtocol {
     const val SERVICE_TYPE = "_home-ktv._tcp."
     const val REQUEST = "HOME_KTV_DISCOVER_V1"
@@ -16,6 +18,11 @@ object DiscoveryProtocol {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    /**
+     * 解析并校验服务端发现响应，非法响应返回 null。
+     *
+     * Parses and validates a discovery response, returning null for invalid payloads.
+     */
     fun parseResponse(payload: String, sourceHost: String): DiscoveredServer? = runCatching {
         val root = json.parseToJsonElement(payload).jsonObject
         if (root["service"]?.jsonPrimitive?.content != "home-ktv") return null

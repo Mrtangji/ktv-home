@@ -116,13 +116,16 @@ public class AdminService {
             song.setTitle(req.title().trim());
             song.setTitlePy(PinyinUtil.fullPinyin(req.title()));
             song.setTitleInit(PinyinUtil.initials(req.title()));
+            song.lockMetadata("title");
         }
         if (req.artist() != null && !req.artist().isBlank()) {
             song.setArtist(req.artist().trim());
             song.setArtistPy(PinyinUtil.fullPinyin(req.artist()));
             song.setArtistInit(PinyinUtil.initials(req.artist()));
+            song.lockMetadata("artist");
         }
-        if (req.language() != null) song.setLanguage(req.language());
+        if (req.language() != null) { song.setLanguage(req.language()); song.lockMetadata("language"); }
+        if (req.vocalForm() != null && !req.vocalForm().isBlank()) { song.setVocalForm(req.vocalForm()); song.lockMetadata("vocalForm"); }
         if (req.tags() != null) song.setTags(req.tags());
         if (req.lyricText() != null && !req.lyricText().isBlank()) {
             String path = assetWriter.writeLyric(song.getFingerprint(), req.lyricText());

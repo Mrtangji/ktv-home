@@ -17,6 +17,12 @@ import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+/**
+ * 局域网发现服务，通过 mDNS 注册和 UDP 广播响应使客户端能在局域网内自动发现服务。
+ *
+ * LAN discovery service that enables clients to automatically discover the service
+ * within the local network via mDNS registration and UDP broadcast response.
+ */
 @Component
 public class LanDiscoveryService {
     public static final String SERVICE_TYPE = "_home-ktv._tcp.local.";
@@ -29,10 +35,24 @@ public class LanDiscoveryService {
     private DatagramSocket udpSocket;
     private int httpPort;
 
+    /**
+     * 构造局域网发现服务。
+     *
+     * Constructs a LAN discovery service.
+     *
+     * @param properties 应用配置属性 / application configuration properties
+     */
     public LanDiscoveryService(AppProperties properties) {
         this.properties = properties;
     }
 
+    /**
+     * Web 服务器就绪后启动 mDNS 注册和 UDP 响应器。
+     *
+     * Starts mDNS registration and UDP responder after the web server is ready.
+     *
+     * @param event Web 服务器初始化完成事件 / web server initialized event
+     */
     @EventListener
     public synchronized void onWebServerReady(WebServerInitializedEvent event) {
         if (!properties.getDiscovery().isEnabled() || httpPort != 0) return;
@@ -41,6 +61,8 @@ public class LanDiscoveryService {
         startUdpResponder();
     }
 
+    // 在每个站点本地地址上注册 mDNS 服务
+    // Register mDNS service on each site-local address
     private void registerMdns() {
         for (InetAddress address : siteLocalAddresses()) {
             try {
@@ -67,6 +89,8 @@ public class LanDiscoveryService {
         }
     }
 
+    // 启动 UDP 广播响应器，监听发现请求并返回服务信息
+    // Start UDP broadcast responder that listens for discovery requests and returns service info
     private void startUdpResponder() {
         int discoveryPort = properties.getDiscovery().getUdpPort();
         udpExecutor = Executors.newSingleThreadExecutor(r -> {
@@ -98,12 +122,23 @@ public class LanDiscoveryService {
         });
     }
 
+    /**
+     * 构建 UDP 发现响应 JSON 负载。
+     *
+     * Builds the UDP discovery response JSON payload.
+     *
+     * @param port HTTP 服务端口 / HTTP service port
+     * @param name 实例名称 / instance name
+     * @return JSON 格式的响应字节数组 / JSON response as byte array
+     */
     static byte[] responsePayload(int port, String name) {
         String safeName = name.replace("\\", "\\\\").replace("\"", "\\\"");
         return ("{\"service\":\"home-ktv\",\"protocolVersion\":1,\"name\":\"" +
                 safeName + "\",\"port\":" + port + "}").getBytes(StandardCharsets.UTF_8);
     }
 
+    // 枚举所有网络接口，收集站点本地 IPv4 地址
+    // Enumerate all network interfaces and collect site-local IPv4 addresses
     private List<InetAddress> siteLocalAddresses() {
         List<InetAddress> addresses = new ArrayList<>();
         try {
@@ -123,6 +158,11 @@ public class LanDiscoveryService {
         return addresses;
     }
 
+    /**
+     * 关闭服务，释放 UDP 和 mDNS 资源。
+     *
+     * Shuts down the service and releases UDP and mDNS resources.
+     */
     @PreDestroy
     public synchronized void close() {
         if (udpSocket != null) udpSocket.close();

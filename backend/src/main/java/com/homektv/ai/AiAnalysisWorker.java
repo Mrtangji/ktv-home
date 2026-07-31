@@ -4,40 +4,54 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.homektv.domain.AiAnalysisTask;
 import com.homektv.domain.Song;
-import com.homektv.config.AppProperties;
 import com.homektv.repo.AiAnalysisTaskRepository;
 import com.homektv.repo.SongRepository;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.homektv.web.ApiException;
 
+/**
+ * AI 分析任务工作器，异步执行歌曲 AI 分类分析。
+ *
+ * AI analysis task worker that asynchronously performs AI-based song classification.
+ */
 @Service
 public class AiAnalysisWorker {
     private final AiAnalysisTaskRepository taskRepository;
     private final SongRepository songRepository;
-    private final DeepSeekClient deepSeekClient;
+    private final OpenAiCompatibleClient aiClient;
     private final ObjectMapper objectMapper;
-    private final AppProperties properties;
+    private final AiConfigService configService;
     private final AiAutoApplyPolicy autoApplyPolicy;
     private final AiClassificationApplier classificationApplier;
 
     public AiAnalysisWorker(AiAnalysisTaskRepository taskRepository, SongRepository songRepository,
-                            DeepSeekClient deepSeekClient, ObjectMapper objectMapper, AppProperties properties,
+                            OpenAiCompatibleClient aiClient, ObjectMapper objectMapper, AiConfigService configService,
                             AiAutoApplyPolicy autoApplyPolicy, AiClassificationApplier classificationApplier) {
         this.taskRepository = taskRepository;
         this.songRepository = songRepository;
-        this.deepSeekClient = deepSeekClient;
+        this.aiClient = aiClient;
         this.objectMapper = objectMapper;
-        this.properties = properties;
+        this.configService = configService;
         this.autoApplyPolicy = autoApplyPolicy;
         this.classificationApplier = classificationApplier;
     }
 
-    @Async
+    /**
+     * 异步执行 AI 分析任务：加载歌曲 → 调用 AI 分类 → 根据策略自动应用或标记为待审核。
+     *
+     * Asynchronously executes the AI analysis task: loads the song → calls AI classification →
+     * auto-applies or marks for review based on policy.
+     *
+     * @param taskId AI 分析任务 ID / AI analysis task ID
+     */
+    @Async("aiBulkExecutor")
     @Transactional
     public void analyze(Long taskId) {
         AiAnalysisTask task = taskRepository.findById(taskId).orElse(null);
         if (task == null) return;
+        if ("paused".equals(task.getStatus())) return;
         task.setStatus("processing");
         task.setAttemptCount(task.getAttemptCount() + 1);
         task.setErrorMessage(null);
@@ -45,26 +59,45 @@ public class AiAnalysisWorker {
         try {
             Song song = songRepository.findById(task.getSongId())
                     .orElseThrow(() -> new IllegalStateException("歌曲不存在: " + task.getSongId()));
-            AiSongClassification result = deepSeekClient.classify(song);
+            AiConfigService.ResolvedConfig config = configService.resolve();
+            AiSongClassification result = aiClient.classify(song, task.getModelRole());
+            // A pause request can arrive while the provider call is in flight.
+            // Do not apply a late result after the task has been paused.
+            AiAnalysisTask current = taskRepository.findById(taskId).orElse(task);
+            if ("paused".equals(current.getStatus())) return;
+            if (config.reasoningModel() != null && !config.reasoningModel().isBlank()
+                    && (result.titleConfidence() < config.identityThreshold()
+                    || result.artistConfidence() < config.identityThreshold()
+                    || result.languageConfidence() < config.classificationThreshold()
+                    || result.vocalFormConfidence() < config.classificationThreshold())) {
+                task.setModelRole("REASONING");
+                task.setModel(config.modelFor("REASONING"));
+                result = aiClient.classify(song, "REASONING");
+            }
             task.setResultJson(objectMapper.writeValueAsString(result));
-            if (autoApplyPolicy.shouldAutoApply(result)) {
-                classificationApplier.apply(task.getSongId(), result);
+            task.setFieldConfidence(objectMapper.writeValueAsString(java.util.Map.of(
+                    "title", result.titleConfidence(), "artist", result.artistConfidence(),
+                    "language", result.languageConfidence(), "vocalForm", result.vocalFormConfidence())));
+            task.setEvidence(objectMapper.writeValueAsString(result.evidence()));
+            if (autoApplyPolicy.shouldAutoApply(result) && classificationApplier.applyAuto(task.getSongId(), result)) {
                 task.setStatus("auto_applied");
             } else {
                 task.setStatus("review");
             }
         } catch (Exception e) {
-            task.setStatus("failed");
+            task.setStatus(e instanceof ApiException api && "AI_IDENTITY_CONFLICT".equals(api.getCode()) ? "review" : "failed");
             task.setErrorMessage(safeMessage(e));
         }
         taskRepository.save(task);
     }
 
+    // 安全截取异常信息（脱敏 API Key、限制长度 1000 字符）
+    // Safely extract exception message (mask API key, cap at 1000 chars)
     private String safeMessage(Exception exception) {
         Throwable value = exception instanceof JsonProcessingException ? exception : exception.getCause();
         String message = value == null ? exception.getMessage() : value.getMessage();
         if (message == null || message.isBlank()) message = exception.getClass().getSimpleName();
-        String apiKey = properties.getAi().getApiKey();
+        String apiKey = configService.resolve().apiKey();
         if (!apiKey.isBlank()) message = message.replace(apiKey, "***");
         return message.length() > 1000 ? message.substring(0, 1000) : message;
     }

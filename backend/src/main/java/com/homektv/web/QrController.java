@@ -24,6 +24,10 @@ import java.util.concurrent.TimeUnit;
 /**
  * 二维码生成（P1.19，详设§11.1）。
  * 内容为 H5 点歌地址 http://<NAS_IP>:8080/m?room=default，供 TV 待机页扫码。
+ *
+ * QR code generation (P1.19, detailed design §11.1).
+ * The content is the H5 song-selection URL http://<NAS_IP>:8080/m?room=default,
+ * displayed on the TV standby page for scanning.
  */
 @RestController
 @RequestMapping("/api")
@@ -37,8 +41,11 @@ public class QrController {
 
     /**
      * 返回 PNG 二维码。
-     * @param room 房间号，默认 default
-     * @param size 边长像素，默认 480，钳制 [120, 1080]
+     *
+     * Returns a PNG QR code image.
+     * @param room 房间号，默认 default / room identifier, defaults to "default"
+     * @param size 边长像素，默认 480，钳制 [120, 1080] / side length in pixels, defaults to 480, clamped to [120, 1080]
+     * @return PNG 格式的二维码图片字节流 / PNG-format QR code image byte stream
      */
     @GetMapping(value = "/qr", produces = MediaType.IMAGE_PNG_VALUE)
     public ResponseEntity<byte[]> qr(

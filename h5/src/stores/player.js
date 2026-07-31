@@ -2,19 +2,24 @@ import { defineStore } from 'pinia'
 import { KtvSocket } from '../api/ws'
 import { useUserStore } from './user'
 
-// 播放器/队列全局状态（详设§4.1：服务端为唯一事实源，此处镜像广播状态）
+/**
+ * 播放器/队列全局状态（详设§4.1：服务端为唯一事实源，此处镜像广播状态）。
+ *
+ * Player/queue global state (Design Spec §4.1: the server is the single source
+ * of truth; this store mirrors the broadcasted state).
+ */
 export const usePlayerStore = defineStore('player', {
   state: () => ({
     connected: false,
     socket: null,
-    nowPlaying: null,      // {queueId, song, orderedByNick}
-    state: 'idle',         // idle / playing / paused
+    nowPlaying: null,      // 当前播放 | {queueId, song, orderedByNick}
+    state: 'idle',         // 播放状态 | idle / playing / paused
     positionMs: 0,
     volume: 60,
     muted: false,
-    vocalMode: 'accompaniment', // original / accompaniment
-    queue: [],             // [{queueId, song, orderedBy, orderedByNick, status}]
-    tvOnline: true,        // TV 是否在线（P2.13）
+    vocalMode: 'accompaniment', // 伴唱模式 | original / accompaniment
+    queue: [],             // 点歌队列 | [{queueId, song, orderedBy, orderedByNick, status}]
+    tvOnline: true,        // TV 是否在线（P2.13） | Whether the TV is online (P2.13)
     connectedPhones: 0,
     lastEffect: null
   }),
@@ -23,7 +28,11 @@ export const usePlayerStore = defineStore('player', {
     isPlaying: (s) => s.state === 'playing'
   },
   actions: {
-    // 建立 WebSocket 连接（进入 App 后调用一次）
+    /**
+     * 建立 WebSocket 连接（进入 App 后调用一次）。
+     *
+     * Establish WebSocket connection (called once after entering the App).
+     */
     connect() {
       if (this.socket) return
       this.socket = new KtvSocket({
@@ -33,11 +42,24 @@ export const usePlayerStore = defineStore('player', {
       this.socket.connect()
     },
 
+    /**
+     * 断开 WebSocket 连接。
+     *
+     * Disconnect the WebSocket connection.
+     */
     disconnect() {
       if (this.socket) { this.socket.close(); this.socket = null }
     },
 
-    // TV 端才上报 progress；H5 仅接收。此处保留发送能力供调试
+    /**
+     * 处理 WebSocket 事件。TV 端才上报 progress；H5 仅接收。此处保留发送能力供调试。
+     *
+     * Handle WebSocket events. Only the TV side reports progress; H5 only receives.
+     * The sending capability is retained here for debugging.
+     *
+     * @param {string} type - 事件类型 / event type
+     * @param {object} payload - 事件负载 / event payload
+     */
     handleEvent(type, payload) {
       switch (type) {
         case 'sync_full':
@@ -64,10 +86,17 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
-    // 应用服务端快照（QueueSnapshot 结构）
+    /**
+     * 应用服务端快照，同步所有播放状态（QueueSnapshot 结构）。
+     *
+     * Apply server snapshot to sync all playback state (QueueSnapshot structure).
+     *
+     * @param {object} snap - 服务端快照对象 / server snapshot object
+     */
     applySnapshot(snap) {
       if (!snap) return
       // now_playing / player_state 等事件 payload 也是完整 snapshot
+      // Events like now_playing / player_state also carry a full snapshot payload
       const playing = snap.playing ?? null
       this.nowPlaying = playing
         ? { queueId: playing.queueId, song: playing.song, orderedByNick: playing.orderedByNick }

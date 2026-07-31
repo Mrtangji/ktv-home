@@ -6,6 +6,12 @@ import org.hibernate.generator.EventType;
 
 import java.time.OffsetDateTime;
 
+/**
+ * 媒体导入记录实体，用于跟踪媒体文件从导入、解析到转码的完整处理流程。
+ *
+ * Media import record entity that tracks the complete processing flow of media files
+ * from import, parsing to transcoding.
+ */
 @Entity
 @Table(name = "media_import_records")
 public class MediaImportRecord {
@@ -74,6 +80,22 @@ public class MediaImportRecord {
     @Column(name = "source_deleted", nullable = false)
     private boolean sourceDeleted;
 
+    @Column(name = "delete_source_requested", nullable = false)
+    private boolean deleteSourceRequested;
+
+    @Column(name = "cleanup_status", nullable = false)
+    private String cleanupStatus = "NOT_REQUESTED";
+
+    @Column(name = "cleanup_error", columnDefinition = "text")
+    private String cleanupError;
+
+    @Column(name = "cleanup_attempted_at")
+    private OffsetDateTime cleanupAttemptedAt;
+
+    @Column(name = "companion_files", columnDefinition = "jsonb", nullable = false)
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    private String companionFiles = "[]";
+
     @Generated(event = EventType.INSERT)
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -82,6 +104,7 @@ public class MediaImportRecord {
     @Column(name = "updated_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime updatedAt;
 
+    // ---- getters / setters ----
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public String getSourcePath() { return sourcePath; }
@@ -124,6 +147,16 @@ public class MediaImportRecord {
     public void setImportedFlag(boolean importedFlag) { this.importedFlag = importedFlag; }
     public boolean isSourceDeleted() { return sourceDeleted; }
     public void setSourceDeleted(boolean sourceDeleted) { this.sourceDeleted = sourceDeleted; }
+    public boolean isDeleteSourceRequested() { return deleteSourceRequested; }
+    public void setDeleteSourceRequested(boolean deleteSourceRequested) { this.deleteSourceRequested = deleteSourceRequested; }
+    public String getCleanupStatus() { return cleanupStatus; }
+    public void setCleanupStatus(String cleanupStatus) { this.cleanupStatus = cleanupStatus; }
+    public String getCleanupError() { return cleanupError; }
+    public void setCleanupError(String cleanupError) { this.cleanupError = cleanupError; }
+    public OffsetDateTime getCleanupAttemptedAt() { return cleanupAttemptedAt; }
+    public void setCleanupAttemptedAt(OffsetDateTime cleanupAttemptedAt) { this.cleanupAttemptedAt = cleanupAttemptedAt; }
+    public String getCompanionFiles() { return companionFiles; }
+    public void setCompanionFiles(String companionFiles) { this.companionFiles = companionFiles; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
 }

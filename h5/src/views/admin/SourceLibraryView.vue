@@ -1,5 +1,6 @@
 <template>
   <AdminLayout active="source">
+    <!-- 页面头部：标题和操作按钮 / Page header: title and action buttons -->
     <header class="page-head">
       <div><h1>原始音乐管理</h1><p>管理扫描源路径中的素材、重复结果和转码入库任务</p></div>
       <div class="header-actions">
@@ -8,6 +9,7 @@
       </div>
     </header>
 
+    <!-- 筛选面板 / Filter panel -->
     <section class="filter-panel">
       <label><span>关键词</span><input v-model.trim="filters.keyword" placeholder="歌名、歌手或文件名" @keyup.enter="search" /></label>
       <label><span>处理状态</span><select v-model="filters.status"><option value="">全部状态</option><option value="pending">待转码</option><option value="duplicate">重复</option><option value="copied">已自动直拷</option><option value="transcoded">已转码</option><option value="unrecognized">未识别</option><option value="failed">失败</option></select></label>
@@ -15,6 +17,7 @@
       <div class="filter-actions"><button class="secondary" @click="reset">重置</button><button class="primary" @click="search">查询</button></div>
     </section>
 
+    <!-- 转码进度面板 / Transcode progress panel -->
     <section v-if="progress.running || progress.total" class="progress-panel">
       <div class="progress-copy"><strong>批量转码进度</strong><span>{{ progress.completed || 0 }} / {{ progress.total || 0 }}，成功 {{ progress.transcoded || 0 }}，重复跳过 {{ (progress.skippedSourceDuplicate || 0) + (progress.skippedOutputDuplicate || 0) }}，失败 {{ progress.failed || 0 }}</span></div>
       <div class="progress-value">{{ progressPercent }}%</div>
@@ -22,6 +25,7 @@
       <div v-if="progress.currentFile" class="current">正在处理：{{ progress.currentFile }}</div>
     </section>
 
+    <!-- 源素材数据表格 / Source material data table -->
     <section class="table-panel">
       <div class="toolbar">
         <span>共 {{ total }} 条源素材</span>
@@ -58,36 +62,100 @@
 </template>
 
 <script setup>
+/**
+ * 原始音乐管理页面 —— 管理扫描源路径中的素材、重复检测和转码入库任务。
+ *
+ * Source library management page — manages scanned source materials, duplicate detection, and transcode import tasks.
+ */
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ListRestart, RefreshCw, Trash2 } from 'lucide-vue-next'
 import api from '../../api/client'
 import AdminLayout from './AdminLayout.vue'
 import { alertDialog, confirmDialog } from '../../composables/useDialog'
 
+// 列表数据、分页、选中项 / List data, pagination, selected items
 const rows = ref([]), total = ref(0), page = ref(0), totalPages = ref(1), selected = ref([])
 const cleaning = ref(false)
 const filters = reactive({ keyword: '', status: '', formatAnalysis: '' })
 const progress = ref({ running:false, total:0, completed:0 })
 let timer = null
+
+/** 当前页是否全选（仅非删除项）/ Whether all non-deleted items on current page are selected */
 const allSelected = computed(() => rows.value.some(x => !x.sourceDeleted) && rows.value.filter(x => !x.sourceDeleted).every(x => selected.value.includes(x.id)))
+
+/** 已选中可转码数量 / Count of selected transcodeable items */
 const selectedTranscodableCount = computed(() => rows.value.filter(x => selected.value.includes(x.id) && isTranscodable(x)).length)
+
+/** 转码进度百分比 / Transcode progress percentage */
 const progressPercent = computed(() => progress.value.total ? Math.round(progress.value.completed * 100 / progress.value.total) : 0)
 
+/**
+ * 加载源素材列表数据。
+ * Load source material list data.
+ */
 async function load() { const r = await api.adminSourceLibrary({ ...filters, page:page.value, size:20 }); rows.value=r.content||[]; total.value=r.total||0; totalPages.value=r.totalPages||1; selected.value=selected.value.filter(id=>rows.value.some(x=>x.id===id)) }
+
+/**
+ * 轮询转码进度，任务结束后自动清除定时器并刷新列表。
+ * Poll transcode progress; auto-clear timer and refresh list when task ends.
+ */
 async function loadProgress() { progress.value = await api.adminSourceTranscodeProgress().catch(()=>progress.value); if (!progress.value.running && timer) { clearInterval(timer); timer=null; await load() } }
-function search(){ page.value=0; load() } function reset(){ Object.assign(filters,{keyword:'',status:'',formatAnalysis:''}); search() } function go(p){ if(p>=0&&p<totalPages.value){page.value=p;load()} }
+
+/** 搜索：重置到第一页 / Search: reset to first page */
+function search(){ page.value=0; load() }
+
+/** 重置筛选条件并重新查询 / Reset filters and re-query */
+function reset(){ Object.assign(filters,{keyword:'',status:'',formatAnalysis:''}); search() }
+
+/** 跳转到指定页 / Navigate to specified page */
+function go(p){ if(p>=0&&p<totalPages.value){page.value=p;load()} }
+
+/** 切换单个条目的选中状态 / Toggle selection for a single item */
 function setSelected(id, checked){ selected.value=checked ? [...new Set([...selected.value,id])] : selected.value.filter(x=>x!==id) }
+
+/** 全选/取消全选当前页非删除项 / Select/deselect all non-deleted items on current page */
 function setAll(checked){ selected.value=checked ? rows.value.filter(x=>!x.sourceDeleted).map(x=>x.id) : [] }
+
+/**
+ * 判断素材是否可转码：需要转码、状态为待转码或失败、且源文件未删除。
+ * Check if a source item is transcodable: requires transcode, status is pending/failed, and source not deleted.
+ */
 function isTranscodable(item){ return item.transcodeRequired && ['PENDING_TRANSCODE','FAILED'].includes(item.displayStatus) && !item.sourceDeleted }
+
+/** 判断素材是否已插队 / Check if a source item is already prioritized */
 function isPrioritized(item){ return (progress.value.priorityRecordIds||[]).includes(item.id) }
+
+/**
+ * 判断素材是否可插队：转码进行中、可转码、非当前处理项、且未插队。
+ * Check if a source item can be prioritized: transcode running, transcodable, not current, not already prioritized.
+ */
 function canPrioritize(item){ return progress.value.running && isTranscodable(item) && progress.value.currentRecordId!==item.id && !isPrioritized(item) }
+
+/** 获取插队按钮文本 / Get priority button text */
 function priorityText(item){ return progress.value.currentRecordId===item.id?'转码中':isPrioritized(item)?'已插队':'插队' }
+
+/**
+ * 启动转码任务并开始轮询进度。
+ * Start transcode task and begin polling progress.
+ *
+ * @param {number[]} ids - 源素材 ID 数组 / source material ID array
+ */
 async function startTranscode(ids){ progress.value=await api.adminStartSourceTranscode(ids); if(timer)clearInterval(timer); timer=setInterval(loadProgress,1500) }
+
+/**
+ * 批量转码所有待处理的歌曲（全量模式）。
+ * Batch transcode all pending songs (full mode).
+ */
 async function transcodeAll(){
   if(progress.value.running)return
   if(!await confirmDialog('将处理全部待转码和转码失败的源文件。',{title:'批量转码所有歌曲'}))return
   try { progress.value=await api.adminStartSourceTranscode([],true); if(timer)clearInterval(timer); timer=setInterval(loadProgress,1500) } catch(e) { await alertDialog(e.message||'全量转码启动失败') }
 }
+
+/**
+ * 自动清理已入库素材 —— 仅删除已成功入库且曲库文件仍存在的原始素材。
+ * Auto-cleanup imported sources — only removes originals that have been successfully imported and whose library files still exist.
+ */
 async function cleanupImported(){
   if(progress.value.running||cleaning.value)return
   if(!await confirmDialog('仅删除已经成功入库、且曲库文件仍然存在的原始素材。待转码、失败、重复、未识别和曲库文件缺失的素材都会保留。源文件删除后不可恢复。',{title:'自动清理已入库素材',tone:'warning'}))return
@@ -100,25 +168,56 @@ async function cleanupImported(){
   } catch(e) { await alertDialog(e.message||'自动清理失败') }
   finally { cleaning.value=false }
 }
+
+/**
+ * 批量转码当前选中的源文件。
+ * Batch transcode currently selected source files.
+ */
 async function transcodeSelected(){
   const ids=rows.value.filter(x=>selected.value.includes(x.id)&&isTranscodable(x)).map(x=>x.id)
   if(!ids.length||progress.value.running)return
   if(!await confirmDialog(`将开始处理 ${ids.length} 个已选择的待处理源文件。`,{title:'批量转码'}))return
   try { await startTranscode(ids) } catch(e) { await alertDialog(e.message||'批量转码启动失败') }
 }
+
+/**
+ * 转码单个源文件。
+ * Transcode a single source file.
+ *
+ * @param {Object} item - 源素材条目 / source material item
+ */
 async function transcodeOne(item){
   if(!isTranscodable(item)||progress.value.running)return
   if(!await confirmDialog(item.sourcePath,{title:'转码该源文件'}))return
   try { await startTranscode([item.id]) } catch(e) { await alertDialog(e.message||'转码启动失败') }
 }
+
+/**
+ * 将指定素材插队到转码队列前端。
+ * Prioritize a source item to the front of the transcode queue.
+ *
+ * @param {Object} item - 源素材条目 / source material item
+ */
 async function prioritize(item){
   if(!canPrioritize(item))return
   try { progress.value=(await api.adminPrioritizeSourceTranscode(item.id)).progress } catch(e) { await alertDialog(e.message||'插队失败') }
 }
+
+/**
+ * 删除单个源文件。
+ * Delete a single source file.
+ *
+ * @param {Object} item - 源素材条目 / source material item
+ */
 async function deleteOne(item){
   if(!await confirmDialog(item.sourcePath,{title:'删除源文件',tone:'warning'}))return
   try { await api.adminDeleteSources([item.id]); await load() } catch (e) { await alertDialog(e.message || '删除失败') }
 }
+
+/**
+ * 批量删除选中的源文件（不可撤销）。
+ * Batch delete selected source files (irreversible).
+ */
 async function deleteSelected(){
   const selectedIds=[...selected.value]
   if(!selectedIds.length)return
@@ -128,15 +227,57 @@ async function deleteSelected(){
     selected.value=[]; await load()
   } catch (e) { await alertDialog(e.message || '批量删除失败') }
 }
-function shortMd5(v){return v?`${v.slice(0,8)}...${v.slice(-8)}`:'—'} function mediaText(v){return{KTV_VIDEO:'KTV 视频',MV:'MV',AUDIO:'音频'}[v]||'未知格式'}
+
+/**
+ * 缩短 MD5 字符串用于显示（取前8位+后8位）。
+ * Shorten MD5 string for display (first 8 + last 8 chars).
+ *
+ * @param {string} v - 完整 MD5 字符串 / full MD5 string
+ * @returns {string} 缩短后的 MD5 / shortened MD5
+ */
+function shortMd5(v){return v?`${v.slice(0,8)}...${v.slice(-8)}`:'—'}
+
+/**
+ * 将媒体类型枚举映射为中文文本。
+ * Map media type enum to Chinese display text.
+ *
+ * @param {string} v - 媒体类型枚举值 / media type enum value
+ * @returns {string} 中文显示文本 / Chinese display text
+ */
+function mediaText(v){return{KTV_VIDEO:'KTV 视频',MV:'MV',AUDIO:'音频'}[v]||'未知格式'}
+
+/**
+ * 将处理状态枚举映射为中文文本。
+ * Map processing status enum to Chinese display text.
+ *
+ * @param {string} v - 状态枚举值 / status enum value
+ * @returns {string} 中文显示文本 / Chinese display text
+ */
 function statusText(v){return{AUTO_COPIED:'已自动直拷',TRANSCODED:'已转码入库',PENDING_TRANSCODE:'待转码',DUPLICATE:'重复跳过',UNRECOGNIZED:'未识别',FAILED:'失败'}[v]||v||'待处理'}
+
+/**
+ * 将处理状态枚举映射为 CSS 类名。
+ * Map processing status enum to CSS class name.
+ *
+ * @param {string} v - 状态枚举值 / status enum value
+ * @returns {string} CSS 类名 / CSS class name
+ */
 function statusClass(v){return{AUTO_COPIED:'green',TRANSCODED:'green',PENDING_TRANSCODE:'blue',DUPLICATE:'amber',UNRECOGNIZED:'red',FAILED:'red'}[v]||'neutral'}
+
+/**
+ * 页面挂载：加载列表数据并初始化进度轮询。
+ * On mount: load list data and initialize progress polling.
+ */
 onMounted(async()=>{await Promise.all([load(),loadProgress()]);if(progress.value.running)timer=setInterval(loadProgress,1500)})
+
+/**
+ * 页面卸载：清除进度轮询定时器。
+ * On unmount: clear progress polling timer.
+ */
 onUnmounted(()=>{if(timer)clearInterval(timer)})
 </script>
 
 <style scoped>
-.page-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}.page-head h1{font-size:22px}.page-head p{color:#64748b;font-size:13px;margin-top:6px}.primary,.secondary,.danger{height:34px;padding:0 14px;border-radius:6px;font-size:13px}.primary{background:#2563eb;color:#fff}.secondary{background:#fff;border:1px solid #cbd5e1;color:#334155}.danger{background:#fff;border:1px solid #fecaca;color:#b91c1c}.primary:disabled,.secondary:disabled,.danger:disabled{opacity:.45;cursor:not-allowed}.filter-panel{display:flex;align-items:flex-end;flex-wrap:wrap;gap:10px;padding:12px 14px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:14px}.filter-panel label{display:flex;flex:0 0 180px;flex-direction:column;gap:5px;color:#475569;font-size:12px}.filter-panel label:first-child{flex-basis:280px}.filter-panel input,.filter-panel select{width:100%;height:34px;border:1px solid #cbd5e1;border-radius:6px;padding:0 10px;background:#fff;color:#172033;font-size:13px;box-shadow:0 1px 2px rgba(15,23,42,.03)}.filter-panel input:focus,.filter-panel select:focus{border-color:#60a5fa;box-shadow:0 0 0 3px rgba(37,99,235,.1);outline:0}.filter-actions{display:flex;align-items:flex-end;gap:8px}.progress-panel,.table-panel{background:#fff;border:1px solid #e2e8f0;border-radius:8px}.progress-panel{padding:16px;margin-bottom:14px;display:grid;grid-template-columns:1fr auto;gap:8px}.progress-copy{display:flex;flex-direction:column;gap:4px}.progress-copy span,.current{font-size:12px;color:#64748b}.progress-value{color:#2563eb;font-weight:700}.track{grid-column:1/-1;height:6px;background:#e2e8f0;border-radius:4px;overflow:hidden}.track i{display:block;height:100%;background:#2563eb}.current{grid-column:1/-1}.toolbar,.pager{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;color:#64748b;font-size:12px}.toolbar{border-bottom:1px solid #e2e8f0}.pager{border-top:1px solid #e2e8f0}.pager div{display:flex;gap:8px}.table-scroll{overflow:auto}table{width:100%;border-collapse:collapse;min-width:1160px;font-size:12px}th{padding:11px 10px;text-align:left;background:#f8fafc;color:#64748b;border-bottom:1px solid #e2e8f0}td{padding:12px 10px;border-bottom:1px solid #eef2f7;vertical-align:top;color:#334155}td strong,td small{display:block}td small{color:#64748b;margin-top:4px;line-height:1.4;max-width:240px;word-break:break-all}.status{display:inline-flex;padding:3px 8px;border-radius:999px;font-weight:600}.green{background:#dcfce7;color:#166534}.blue{background:#dbeafe;color:#1d4ed8}.amber{background:#fef3c7;color:#92400e}.red{background:#fee2e2;color:#b91c1c}.neutral{background:#f1f5f9;color:#475569}.md5{min-width:150px}.link{font-size:12px;color:#2563eb}.danger-text{color:#b91c1c}.link:disabled{color:#94a3b8;cursor:not-allowed}.empty{text-align:center;padding:36px;color:#94a3b8}@media(max-width:700px){.filter-panel label:first-child{flex-basis:100%}.filter-panel label:not(:first-child){flex:1 1 140px}.filter-actions{width:100%;justify-content:flex-end}}
-.header-actions,.batch-actions,.row-actions,.action-button{display:flex;align-items:center}.header-actions,.batch-actions{gap:8px}.action-button{justify-content:center;gap:5px;white-space:nowrap}.row-actions{gap:12px}.priority-text{color:#b45309}@media(max-width:700px){.page-head{align-items:flex-start;gap:12px}.header-actions,.batch-actions{flex-wrap:wrap;justify-content:flex-end}.toolbar{align-items:flex-start;gap:10px}}
+.page-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}.page-head h1{font-size:22px}.page-head p{color:#64748b;font-size:13px;margin-top:6px}.primary,.secondary,.danger{height:34px;padding:0 14px;border-radius:6px;font-size:13px}.primary{background:#2563eb;color:#fff}.secondary{background:#fff;border:1px solid #cbd5e1;color:#334155}.danger{background:#fff;border:1px solid #fecaca;color:#b91c1c}.primary:disabled,.secondary:disabled,.danger:disabled{opacity:.45;cursor:not-allowed}.filter-panel{display:flex;align-items:flex-end;flex-wrap:wrap;gap:10px;padding:12px 14px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:14px}.filter-panel label{display:flex;flex:0 0 180px;flex-direction:column;gap:5px;color:#475569;font-size:12px}.filter-panel label:first-child{flex-basis:280px}.filter-panel input,.filter-panel select{width:100%;height:34px;border:1px solid #cbd5e1;border-radius:6px;padding:0 10px;background:#fff;color:#172033;font-size:13px;box-shadow:0 1px 2px rgba(15,23,42,.03)}.filter-panel input:focus,.filter-panel select:focus{border-color:#60a5fa;box-shadow:0 0 0 3px rgba(37,99,235,.1);outline:0}.filter-actions{display:flex;align-items:flex-end;gap:8px}.progress-panel,.table-panel{background:#fff;border:1px solid #e2e8f0;border-radius:8px}.progress-panel{padding:16px;margin-bottom:14px;display:grid;grid-template-columns:1fr auto;gap:8px}.progress-copy{display:flex;flex-direction:column;gap:4px}.progress-copy span,.current{font-size:12px;color:#64748b}.progress-value{color:#2563eb;font-weight:700}.track{grid-column:1/-1;height:6px;background:#e2e8f0;border-radius:4px;overflow:hidden}.track i{display:block;height:100%;background:#2563eb}.current{grid-column:1/-1}.toolbar,.pager{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;color:#64748b;font-size:12px}.toolbar{border-bottom:1px solid #e2e8f0}.pager{border-top:1px solid #e2e8f0}.pager div{display:flex;gap:8px}.table-scroll{overflow-x:auto}table{width:100%;border-collapse:collapse}td,th{padding:12px 14px;font-size:12px;text-align:left;border-bottom:1px solid #e2e8f0;white-space:nowrap}td strong{display:block;font-size:13px;color:#172033;max-width:260px;overflow:hidden;text-overflow:ellipsis}td small{display:block;color:#64748b;font-size:11px;margin-top:2px;max-width:200px;overflow:hidden;text-overflow:ellipsis}.md5 small{font-family:ui-monospace,SFMono-Regular,monospace;font-size:11px}.link{background:0 0;border:0;color:#2563eb;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:4px}.link:hover:not(:disabled){background:#eff6ff}.danger-text{color:#b91c1c}.danger-text:hover:not(:disabled){background:#fef2f2}.priority-text{color:#b45309}.priority-text:hover:not(:disabled){background:#fffbeb}.status{display:inline-block;padding:2px 8px;font-size:11px;border-radius:4px;font-weight:600}.status.blue{background:#dbeafe;color:#1d4ed8}.status.green{background:#dcfce7;color:#15803d}.status.amber{background:#fef3c7;color:#a16207}.status.red{background:#fee2e2;color:#b91c1c}.status.neutral{background:#f1f5f9;color:#475569}.empty{text-align:center;padding:48px;color:#94a3b8}.header-actions,.batch-actions,.row-actions,.action-button{display:flex;align-items:center}.header-actions,.batch-actions{gap:8px}.action-button{justify-content:center;gap:5px;white-space:nowrap}.row-actions{gap:12px}.priority-text{color:#b45309}@media(max-width:700px){.page-head{align-items:flex-start;gap:12px}.header-actions,.batch-actions{flex-wrap:wrap;justify-content:flex-end}.toolbar{align-items:flex-start;gap:10px}}
 .cleanup-button{background:#dc2626;border-color:#dc2626;color:#fff;font-weight:700;box-shadow:0 3px 10px rgba(185,28,28,.28)}.cleanup-button:hover:not(:disabled){background:#b91c1c;border-color:#b91c1c;box-shadow:0 4px 14px rgba(185,28,28,.36)}.cleanup-button:focus-visible{outline:3px solid rgba(248,113,113,.35);outline-offset:2px}
 </style>

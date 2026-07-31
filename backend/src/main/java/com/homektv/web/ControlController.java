@@ -15,6 +15,9 @@ import org.springframework.web.bind.annotation.*;
 /**
  * 统一控制入口 + 队列快照（P1.12，详设§4.3/§11.1）。
  * 变更后返回最新快照；WebSocket 广播接入见 P1.14。
+ *
+ * Unified control endpoint and queue snapshot (P1.12, detailed design §4.3/§11.1).
+ * Returns the latest snapshot after every mutation; WebSocket broadcasting is covered in P1.14.
  */
 @RestController
 @RequestMapping("/api")
@@ -38,13 +41,27 @@ public class ControlController {
         this.broadcaster = broadcaster;
     }
 
-    /** 当前队列 + 播放状态快照 */
+    /**
+     * 获取当前队列与播放状态快照。
+     *
+     * Returns the current queue and playback state snapshot.
+     * @return 包含队列列表及播放器状态的快照对象 / snapshot containing the queue items and player state
+     */
     @GetMapping("/queue")
     public QueueSnapshot queue() {
         return snapshotService.snapshot();
     }
 
-    /** 统一控制指令 */
+    /**
+     * 统一控制指令入口，支持点歌、切歌、暂停、音量等操作。
+     * 所有变更后自动广播对应 WebSocket 事件并返回最新快照。
+     *
+     * Unified control endpoint for ordering songs, skipping, pausing, adjusting
+     * volume, and other playback commands. Automatically broadcasts the relevant
+     * WebSocket event and returns the latest snapshot after every mutation.
+     * @param req 控制请求体 / control request body
+     * @return 变更后的最新队列与播放状态快照 / latest snapshot after the mutation
+     */
     @PostMapping("/control")
     public QueueSnapshot control(@RequestBody ControlRequest req) {
         String action = req.action() == null ? "" : req.action();
@@ -116,12 +133,19 @@ public class ControlController {
         }
     }
 
-    /** 广播当前快照到所有端（详设§4.1：客户端以广播为准） */
+    /**
+     * 广播当前快照到所有端（详设§4.1：客户端以广播为准）。
+     * Broadcasts the current snapshot to all clients (detailed design §4.1: clients rely on broadcasts).
+     */
     private void broadcast(String eventType) {
         broadcaster.broadcast(WsEvent.of(eventType, snapshotService.snapshot()));
     }
 
-    /** 删歌权限：本人点的才能删（详设§4.4.3；TV/后台删任意由其它入口处理） */
+    /**
+     * 删歌权限：本人点的才能删（详设§4.4.3；TV/后台删任意由其它入口处理）。
+     * Cancel permission: only the user who ordered a song may remove it
+     * (detailed design §4.4.3; TV/backend arbitrary deletion is handled by other endpoints).
+     */
     private void cancelWithPermission(Long queueId, Long userId) {
         QueueItem item = queueRepo.findById(queueId)
                 .orElseThrow(() -> new ApiException("QUEUE_ITEM_NOT_FOUND", "队列项不存在"));

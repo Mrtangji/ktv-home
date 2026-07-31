@@ -19,6 +19,8 @@ import java.util.List;
 
 /**
  * 歌曲搜索/详情/资源 API（P1.6/P1.7，详设§11.1）。
+ *
+ * Song search / detail / resource API (P1.6/P1.7, detailed design §11.1).
  */
 @RestController
 @RequestMapping("/api")
@@ -29,6 +31,11 @@ public class SongController {
     private final SongFileRepository fileRepo;
     private final Path dataRoot;
 
+    /**
+     * 构造器，注入搜索服务、歌曲仓库、文件仓库及数据根路径配置。
+     *
+     * Constructor injecting search service, song repository, file repository, and data root path configuration.
+     */
     public SongController(SongSearchService searchService, SongRepository songRepo,
                           SongFileRepository fileRepo, AppProperties props) {
         this.searchService = searchService;
@@ -37,7 +44,15 @@ public class SongController {
         this.dataRoot = Path.of(props.getDataPath());
     }
 
-    /** 综合搜索（P1.6）：keyword 支持中文/全拼/首字母 */
+    /**
+     * 综合搜索（P1.6）：keyword 支持中文/全拼/首字母。
+     *
+     * Combined search (P1.6): keyword supports Chinese characters, full pinyin, or initials.
+     * @param keyword 搜索关键词 / search keyword
+     * @param type    媒体类型过滤（可选）/ media type filter (optional)
+     * @param page    分页页码 / page number
+     * @return 匹配的歌曲列表 / list of matching songs
+     */
     @GetMapping("/songs")
     public List<SongDto> search(@RequestParam(defaultValue = "") String keyword,
                                 @RequestParam(defaultValue = "") String type,
@@ -49,7 +64,13 @@ public class SongController {
                 .toList();
     }
 
-    /** 歌曲详情（P1.7） */
+    /**
+     * 歌曲详情（P1.7）。
+     *
+     * Song detail (P1.7).
+     * @param id 歌曲ID / song ID
+     * @return 歌曲详情，包含关联的有效文件列表 / song detail with associated valid file list
+     */
     @GetMapping("/songs/{id}")
     public ResponseEntity<SongDetailDto> detail(@PathVariable Long id) {
         return songRepo.findById(id)
@@ -58,7 +79,13 @@ public class SongController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    /** 封面资源（P1.7） */
+    /**
+     * 封面资源（P1.7）。
+     *
+     * Cover image resource (P1.7).
+     * @param id 歌曲ID / song ID
+     * @return 封面图片资源 / cover image resource
+     */
     @GetMapping("/cover/{id}")
     public ResponseEntity<Resource> cover(@PathVariable Long id) {
         return songRepo.findById(id)
@@ -67,7 +94,13 @@ public class SongController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    /** 歌词资源（P1.7）：返回原始歌词文本（LRC/KSC）；JSON 时间轴解析留 P1.26 */
+    /**
+     * 歌词资源（P1.7）：返回原始歌词文本（LRC/KSC）；JSON 时间轴解析留 P1.26。
+     *
+     * Lyric resource (P1.7): returns raw lyric text (LRC/KSC); JSON timeline parsing deferred to P1.26.
+     * @param id 歌曲ID / song ID
+     * @return 歌词文本资源 / lyric text resource
+     */
     @GetMapping(value = "/lyric/{id}", produces = "text/plain;charset=UTF-8")
     public ResponseEntity<Resource> lyric(@PathVariable Long id) {
         return songRepo.findById(id)

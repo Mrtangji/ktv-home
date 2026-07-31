@@ -1,5 +1,7 @@
 package com.homektv.tv.ui
 
+import android.animation.ObjectAnimator
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -22,7 +24,12 @@ import com.homektv.tv.net.SavedServer
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-/** TV 服务选择页：历史设备、按需扫描的局域网设备，以及手动输入。 */
+/**
+ * TV 服务选择页：历史设备、按需扫描的局域网设备，以及手动输入。
+ *
+ * TV server selection screen for remembered devices, on-demand LAN discovery,
+ * and manual server entry.
+ */
 class SetupActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySetupBinding
@@ -31,6 +38,7 @@ class SetupActivity : AppCompatActivity() {
     private val scanner = LanScanner()
     private val discovered = linkedMapOf<String, DiscoveredServer>()
     private var scanJob: Job? = null
+    private val rhythmAnimators = mutableListOf<ObjectAnimator>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,8 +55,33 @@ class SetupActivity : AppCompatActivity() {
         }
 
         renderHistory()
+        startRhythm()
         rebuildFocusChain()
         binding.root.post { firstFocusableView()?.requestFocus() }
+    }
+
+    private fun startRhythm() {
+        val bars = listOf(binding.rhythmBar1, binding.rhythmBar2, binding.rhythmBar3, binding.rhythmBar4)
+        bars.forEachIndexed { index, bar ->
+            bar.post {
+                bar.pivotY = bar.height.toFloat()
+                ObjectAnimator.ofFloat(bar, View.SCALE_Y, 0.45f, 1f).apply {
+                    duration = 460L + index * 90L
+                    startDelay = index * 70L
+                    repeatCount = ObjectAnimator.INFINITE
+                    repeatMode = ObjectAnimator.REVERSE
+                    interpolator = AccelerateDecelerateInterpolator()
+                    rhythmAnimators += this
+                    start()
+                }
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        rhythmAnimators.forEach(ObjectAnimator::cancel)
+        rhythmAnimators.clear()
+        super.onDestroy()
     }
 
     private fun startScan() {

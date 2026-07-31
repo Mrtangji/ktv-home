@@ -1,9 +1,14 @@
 package com.homektv.tv.player
 
-/** Lightweight LRC timeline parser; supports multiple timestamps per line. */
+/**
+ * 轻量级 LRC 时间轴解析器，支持一行多个时间戳。
+ *
+ * Lightweight LRC timeline parser that supports multiple timestamps per line.
+ */
 data class LyricWord(val startMs: Long, val text: String)
 data class LyricLine(val startMs: Long, val text: String, val words: List<LyricWord> = emptyList())
 
+/** LRC lyric parser and timestamp conversion utilities. / LRC 歌词解析与时间戳转换工具。 */
 object LrcParser {
     private val lineTag = Regex("\\[(\\d{1,3}):(\\d{2})(?:[.:](\\d{1,3}))?]")
     private val wordTag = Regex("<(\\d{1,3}):(\\d{2})(?:[.:](\\d{1,3}))?>")

@@ -15,6 +15,10 @@ import java.util.concurrent.TimeUnit;
 /**
  * 通过 ProcessBuilder 调用 ffprobe 探测媒体文件（P0.7）。
  * 解析音轨数、字幕流、时长、分辨率，供曲库扫描（P1.1）判定类型使用。
+ *
+ * Probes media files by invoking ffprobe through ProcessBuilder (P0.7).
+ * Extracts audio tracks, subtitle streams, duration, and resolution for media
+ * classification during library scanning (P1.1).
  */
 @Service
 public class FFprobeService {
@@ -89,6 +93,12 @@ public class FFprobeService {
             java.util.List<AudioStreamInfo> audioStreams = new java.util.ArrayList<>();
             String videoCodec = null;
             String audioCodec = null;
+            String title = null, artist = null, language = null;
+            JsonNode formatTags = format.path("tags");
+            title = textOrNull(formatTags, "title");
+            artist = textOrNull(formatTags, "artist");
+            if (artist == null) artist = textOrNull(formatTags, "album_artist");
+            language = textOrNull(formatTags, "language");
 
             for (JsonNode stream : root.path("streams")) {
                 String type = stream.path("codec_type").asText("");
@@ -100,17 +110,17 @@ public class FFprobeService {
                         JsonNode disp = stream.path("disposition");
                         JsonNode tags = stream.path("tags");
                         // 音轨标题/语言标签大小写不敏感，取时统一去空白
-                        String title = textOrNull(tags, "title");
+                        String streamTitle = textOrNull(tags, "title");
                         // MP4 stores FFmpeg's stream title metadata as `name`.
-                        if (title == null) {
-                            title = textOrNull(tags, "name");
+                        if (streamTitle == null) {
+                            streamTitle = textOrNull(tags, "name");
                         }
-                        String language = textOrNull(tags, "language");
+                        String streamLanguage = textOrNull(tags, "language");
                         int channels = stream.path("channels").asInt(0);
                         boolean karaoke = disp.path("karaoke").asInt(0) == 1;
                         boolean isDefault = disp.path("default").asInt(0) == 1;
                         audioStreams.add(new AudioStreamInfo(
-                                audioTracks, title, language, channels, karaoke, isDefault));
+                                audioTracks, streamTitle, streamLanguage, channels, karaoke, isDefault));
                         audioTracks++;
                     }
                     case "subtitle" -> subtitleTracks++;
@@ -134,13 +144,17 @@ public class FFprobeService {
             }
 
             return new MediaProbe(durationMs, audioTracks, subtitleTracks, hasVideo, resolution,
-                    java.util.List.copyOf(audioStreams), videoCodec, audioCodec);
+                    java.util.List.copyOf(audioStreams), videoCodec, audioCodec, title, artist, language);
         } catch (IOException e) {
             throw new MediaProbeException("解析 ffprobe JSON 失败", e);
         }
     }
 
-    /** 取 JSON 文本字段，缺失/空白返回 null。 */
+    /**
+     * 取 JSON 文本字段，缺失/空白返回 null。
+     *
+     * Read a JSON text field and return null when it is missing or blank.
+     */
     private static String textOrNull(JsonNode node, String field) {
         if (!node.hasNonNull(field)) return null;
         String v = node.get(field).asText().trim();

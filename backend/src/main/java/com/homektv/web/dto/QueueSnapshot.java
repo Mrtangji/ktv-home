@@ -4,6 +4,8 @@ import java.util.List;
 
 /**
  * 队列 + 播放状态快照（详设§11.1 GET /queue，也用于 WS sync_full）。
+ *
+ * Queue and playback status snapshot (detailed design §11.1 GET /queue, also used for WS sync_full).
  */
 public record QueueSnapshot(
         NowPlaying playing,
@@ -12,12 +14,12 @@ public record QueueSnapshot(
         int volume,
         boolean muted,
         String vocalMode,  // original/accompaniment
-        boolean tvOnline,  // TV 是否在线（P2.13：H5 据此显示「电视未连接」横幅）
+        boolean tvOnline,  // TV 是否在线（P2.13：H5 据此显示「电视未连接」横幅） / Whether TV is online (P2.13: H5 shows "TV not connected" banner based on this)
         long connectedPhones
 ) {
-    /** 正在播放 */
+    /** 正在播放 / Now playing */
     public record NowPlaying(Long queueId, SongDto song, String orderedByNick) {}
 
-    /** 队列条目 */
+    /** 队列条目 / Queue entry */
     public record QueueEntry(Long queueId, SongDto song, Long orderedBy, String orderedByNick, String status) {}
 }

@@ -4,6 +4,8 @@ import com.homektv.domain.Song;
 
 /**
  * 歌曲列表/搜索结果项（详设§11.1）。
+ *
+ * Song list / search result item (see detailed design &sect;11.1).
  */
 public record SongDto(
         Long id,
@@ -16,6 +18,15 @@ public record SongDto(
         String coverUrl,
         int playCount
 ) {
+    /**
+     * 将 {@link Song} 领域对象转换为 SongDto，封面路径组装为 API 访问地址，无封面时返回 {@code null}。
+     *
+     * Converts a {@link Song} domain object to a SongDto. The cover path is assembled as an API URL,
+     * or {@code null} when no cover is set.
+     *
+     * @param s 歌曲领域对象 / the song domain object
+     * @return 对应的 SongDto / the corresponding SongDto
+     */
     public static SongDto from(Song s) {
         return new SongDto(
                 s.getId(),

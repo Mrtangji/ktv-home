@@ -26,6 +26,16 @@ import java.util.List;
  * 用 StreamingResponseBody + RandomAccessFile 手动流字节，完全掌控
  * Content-Type / Content-Range / Content-Length，不受 ResourceRegion 转换器
  * 的 Content-Type 白名单限制（其默认仅接受 octet-stream，video/mp4 会被拒）。
+ *
+ * Media streaming controller (P1.17, detailed design §11.1).
+ * Supports HTTP Range for instant playback and seeking of large files (MKV, MP4, etc.);
+ * TV-side ExoPlayer pulls streams progressively.
+ * file_id = song_files.id.
+ *
+ * Uses StreamingResponseBody + RandomAccessFile to manually stream bytes, giving full
+ * control over Content-Type / Content-Range / Content-Length headers, bypassing the
+ * ResourceRegion converter's Content-Type whitelist limitation (which defaults to
+ * octet-stream only and rejects video/mp4).
  */
 @RestController
 @RequestMapping("/api")
@@ -39,6 +49,22 @@ public class StreamController {
         this.fileRepo = fileRepo;
     }
 
+    /**
+     * 流式输出媒体文件，支持 HTTP Range 请求以实现断点续传和 seek。
+     *
+     * Streams the media file identified by the given file ID, with HTTP Range support
+     * for resumable downloads and seeking.
+     *
+     * @param fileId      歌曲文件 ID（song_files.id）
+     *                    Song file ID (song_files.id)
+     * @param rangeHeader HTTP Range 请求头，可空；空时返回完整文件
+     *                    HTTP Range request header; when empty, the full file is returned
+     * @return ResponseEntity wrapped over a StreamingResponseBody:
+     *         no Range → 200 OK + full file;
+     *         with Range → 206 Partial Content;
+     *         file not found or missing on disk → 404;
+     *         Range out of bounds → 416 Range Not Satisfiable
+     */
     @GetMapping("/stream/{fileId}")
     public ResponseEntity<StreamingResponseBody> stream(
             @PathVariable Long fileId,
@@ -99,7 +125,20 @@ public class StreamController {
                 .build();
     }
 
-    /** 从 offset 起流出 count 字节。 */
+    /**
+     * 从指定偏移量开始流式写入 count 字节到输出流。
+     *
+     * Streams count bytes starting from the given offset into the output stream.
+     *
+     * @param file   目标文件
+     *               The target file
+     * @param offset 起始偏移量（字节）
+     *               Starting offset in bytes
+     * @param count  要流出的字节数
+     *               Number of bytes to stream
+     * @return StreamingResponseBody 回调
+     *         StreamingResponseBody callback
+     */
     private StreamingResponseBody writeRegion(File file, long offset, long count) {
         return out -> {
             try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
@@ -118,7 +157,19 @@ public class StreamController {
         };
     }
 
-    /** 按容器格式/扩展名映射 Content-Type，未知回退 octet-stream。 */
+    /**
+     * 按容器格式或文件扩展名映射对应的 Content-Type，无法识别时回退到 octet-stream。
+     *
+     * Maps a container format or file extension to the corresponding Content-Type,
+     * falling back to octet-stream when unrecognized.
+     *
+     * @param format 容器格式（如 matroska、mp4）
+     *               Container format (e.g. matroska, mp4)
+     * @param name   文件名（用于提取扩展名）
+     *               File name (used to extract the extension)
+     * @return 映射后的 MediaType
+     *         The resolved MediaType
+     */
     private MediaType mediaTypeFor(String format, String name) {
         String f = format == null ? "" : format.toLowerCase();
         String n = name.toLowerCase();

@@ -12,6 +12,11 @@ import com.homektv.tv.R
 import com.homektv.tv.player.LyricLine
 import com.homektv.tv.player.LyricSweepCalculator
 
+/**
+ * 单行卡拉 OK 歌词视图，按播放进度逐字绘制高亮效果。
+ *
+ * Single-line karaoke lyric view that reveals highlighted text with playback progress.
+ */
 class KaraokeLyricView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -30,6 +35,11 @@ class KaraokeLyricView @JvmOverloads constructor(
     private var sampledAtMs = 0L
     private var playing = false
 
+    /**
+     * 设置当前歌词行及其结束时间。
+     *
+     * Sets the current lyric line and its end timestamp.
+     */
     fun setLine(value: LyricLine?, endMs: Long) {
         if (line == value && lineEndMs == endMs) return
         line = value

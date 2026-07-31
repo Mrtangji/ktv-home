@@ -17,6 +17,11 @@ import androidx.core.content.ContextCompat
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
+/**
+ * 麦克风输入监视器，选择外部输入设备并把采集状态回调给界面。
+ *
+ * Microphone input monitor that selects external devices and reports capture state to the UI.
+ */
 class MicrophoneMonitor(
     context: Context,
     private val onStateChanged: (State) -> Unit,
@@ -35,6 +40,11 @@ class MicrophoneMonitor(
     private var audioTrack: AudioTrack? = null
     private var communicationDevice: AudioDeviceInfo? = null
 
+    /**
+     * 枚举并按优先级返回可用的外部麦克风输入设备。
+     *
+     * Enumerates available external microphone inputs and sorts them by priority.
+     */
     fun externalInputs(): List<AudioDeviceInfo> = runCatching {
         val devices = audioManager
             .getDevices(AudioManager.GET_DEVICES_INPUTS)
@@ -49,6 +59,11 @@ class MicrophoneMonitor(
         emptyList()
     }
 
+    /**
+     * 启动麦克风监听；权限或设备不可用时返回 false。
+     *
+     * Starts microphone monitoring and returns false when permission or hardware is unavailable.
+     */
     fun start(): Boolean {
         if (running.get()) return true
         if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {

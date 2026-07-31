@@ -13,6 +13,11 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
 
+/**
+ * 卡拉 OK 氛围特效叠加层，负责绘制粒子、闪光和文字效果。
+ *
+ * Karaoke ambience-effect overlay that renders particles, flashes, and glyphs.
+ */
 class EffectOverlayView(context: Context) : View(context) {
     private data class Particle(
         val x: Float,
@@ -45,6 +50,11 @@ class EffectOverlayView(context: Context) : View(context) {
         setLayerType(LAYER_TYPE_SOFTWARE, null)
     }
 
+    /**
+     * 播放指定特效；未知特效 ID 会被安全忽略。
+     *
+     * Plays the requested effect and safely ignores unknown effect IDs.
+     */
     fun play(effectId: String) {
         val spec = EffectVisuals.find(effectId) ?: return
         val seed = SystemClock.elapsedRealtime().toInt() xor effectId.hashCode()

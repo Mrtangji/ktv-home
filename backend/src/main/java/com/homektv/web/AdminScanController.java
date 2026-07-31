@@ -24,6 +24,8 @@ import java.util.Map;
 
 /**
  * 管理后台 API（P2.1-P2.6/P1.8，详设§8/§11.1）。局域网免登录。
+ *
+ * Admin backend API (P2.1-P2.6/P1.8, design spec §8/§11.1). LAN access without login.
  */
 @RestController
 @RequestMapping("/api/admin")
@@ -53,23 +55,52 @@ public class AdminScanController {
         this.reparseService = reparseService;
     }
 
-    /** 触发全量/增量扫描（P1.8） */
+    /**
+     * 触发全量/增量扫描（P1.8）。
+     *
+     * Trigger a full/incremental scan (P1.8).
+     * @return scan result containing source scan details
+     */
     @PostMapping("/scan")
     public Map<String, Object> scan() {
         MediaImportService.SourceScanResult sourceScan = mediaImportService.scanSourceLibrary();
         return Map.of("sourceScan", sourceScan);
     }
 
+    /**
+     * 启动源库扫描任务。
+     *
+     * Start a source library scan task.
+     * @return scan progress indicating current status
+     */
     @PostMapping("/scan/start")
     public MediaImportService.SourceScanProgress startScan() {
         return mediaImportService.startSourceScan();
     }
 
+    /**
+     * 获取扫描任务的当前进度。
+     *
+     * Get current progress of the scan task.
+     * @return scan progress details
+     */
     @GetMapping("/scan/progress")
     public MediaImportService.SourceScanProgress scanProgress() {
         return mediaImportService.getScanProgress();
     }
 
+    /**
+     * 分页查询源库文件列表，支持关键词、状态、格式分析等筛选条件。
+     *
+     * Paginated query of the source library file list, with filters for keyword, status, and format analysis.
+     * @param keyword search keyword
+     * @param status import status filter
+     * @param formatAnalysis format analysis filter
+     * @param sourceDeleted whether the source has been deleted
+     * @param page page number (0-based)
+     * @param size page size
+     * @return paginated source library records
+     */
     @GetMapping("/source-library")
     public Map<String, Object> sourceLibrary(@RequestParam(defaultValue = "") String keyword,
                                              @RequestParam(defaultValue = "") String status,
@@ -87,6 +118,13 @@ public class AdminScanController {
         );
     }
 
+    /**
+     * 启动源库文件的转码任务，支持指定 ID 列表或全部待转码文件。
+     *
+     * Start transcoding for source library files. Supports specific ID list or all pending files.
+     * @param request optional body containing file IDs and/or "all" flag
+     * @return transcode progress
+     */
     @PostMapping("/source-library/transcode")
     public MediaImportService.TranscodeProgress transcodeSourceLibrary(
             @RequestBody(required = false) SourceLibraryRequest request) {
@@ -95,21 +133,47 @@ public class AdminScanController {
                 request != null && request.all());
     }
 
+    /**
+     * 获取源库转码任务的当前进度。
+     *
+     * Get current progress of the source library transcode task.
+     * @return transcode progress details
+     */
     @GetMapping("/source-library/progress")
     public MediaImportService.TranscodeProgress sourceLibraryProgress() {
         return mediaImportService.getProgress();
     }
 
+    /**
+     * 将指定文件的转码任务提升为优先处理。
+     *
+     * Prioritize the transcode task for the specified file.
+     * @param request request containing the file ID to prioritize
+     * @return priority result
+     */
     @PostMapping("/source-library/transcode/priority")
     public MediaImportService.PriorityResult prioritizeSourceTranscode(@RequestBody PriorityTranscodeRequest request) {
         return mediaImportService.prioritizeTranscode(request.id());
     }
 
+    /**
+     * 清理已导入的源文件。
+     *
+     * Clean up source files that have already been imported.
+     * @return auto cleanup result
+     */
     @PostMapping("/source-library/cleanup")
     public MediaImportService.AutoCleanupResult cleanupImportedSources() {
         return mediaImportService.cleanupImportedSources();
     }
 
+    /**
+     * 删除源库文件，支持按 ID 列表删除或按条件筛选删除。
+     *
+     * Delete source library files by ID list or by filter criteria.
+     * @param request request containing IDs or filter criteria
+     * @return deletion result
+     */
     @DeleteMapping("/source-library")
     public MediaImportService.DeleteSourcesResult deleteSources(@RequestBody SourceLibraryRequest request) {
         if (!request.ids().isEmpty()) {
@@ -119,6 +183,15 @@ public class AdminScanController {
                 request.keyword(), request.status(), request.formatAnalysis(), request.sourceDeleted());
     }
 
+    /**
+     * 分页查询导入记录列表，支持按操作类型筛选。
+     *
+     * Paginated query of import records, with optional action filter.
+     * @param action import action filter
+     * @param page page number (0-based)
+     * @param size page size
+     * @return paginated import records
+     */
     @GetMapping("/imports")
     public Map<String, Object> imports(@RequestParam(defaultValue = "") String action,
                                        @RequestParam(defaultValue = "0") int page,
@@ -132,29 +205,59 @@ public class AdminScanController {
         );
     }
 
+    /**
+     * 删除单个源文件记录。
+     *
+     * Delete a single source file record.
+     * @param id source record ID
+     * @return status confirmation
+     */
     @DeleteMapping("/imports/{id}/source")
     public Map<String, Object> deleteSource(@PathVariable Long id) {
         mediaImportService.deleteSource(id);
         return Map.of("status", "deleted", "id", id);
     }
 
-    /** Generate an Android TV compatible H.264/AAC derivative; original remains untouched. */
+    /**
+     * 为指定歌曲生成 Android TV 兼容的 H.264/AAC 衍生文件；原始文件保持不变。
+     *
+     * Generate an Android TV compatible H.264/AAC derivative; original remains untouched.
+     * @param id song ID
+     * @return transcode result with scan info
+     */
     @PostMapping("/songs/{id}/transcode")
     public Map<String, Object> transcode(@PathVariable Long id) {
         TranscodeService.Result result = transcodeService.transcodeSong(id);
         LibraryScanService.ScanResult scan = scanService.scanAll();
+        int cleaned = Boolean.TRUE.equals(settingService.getAll().get(SettingService.DELETE_SOURCE_AFTER_TRANSCODE))
+                ? mediaImportService.cleanupSongSource(id) : 0;
         return Map.of("status", "completed", "sourceFileId", result.sourceFileId(),
                 "outputPath", result.outputPath(), "outputBytes", result.outputBytes(),
-                "scan", scan);
+                "scan", scan, "sourceDeleted", cleaned);
     }
 
-    /** 仪表盘（P2.1） */
+    /**
+     * 仪表盘（P2.1）。
+     *
+     * Dashboard overview (P2.1).
+     * @return dashboard statistics
+     */
     @GetMapping("/status")
     public DashboardDto status() {
         return adminService.dashboard();
     }
 
-    /** 曲库分页列表 + 类型筛选（P2.2） */
+    /**
+     * 曲库分页列表 + 类型筛选（P2.2）。
+     *
+     * Paginated song library list with type filter (P2.2).
+     * @param keyword search keyword
+     * @param type song type filter
+     * @param source source filter
+     * @param page page number (0-based)
+     * @param size page size
+     * @return paginated song list
+     */
     @GetMapping("/songs")
     public Map<String, Object> listSongs(@RequestParam(defaultValue = "") String keyword,
                                          @RequestParam(defaultValue = "") String type,
@@ -170,25 +273,53 @@ public class AdminScanController {
         );
     }
 
-    /** 编辑曲目（P2.3） */
+    /**
+     * 编辑曲目（P2.3）。
+     *
+     * Edit a song (P2.3).
+     * @param id song ID
+     * @param req edit request body
+     * @return updated song DTO
+     */
     @PutMapping("/songs/{id}")
     public SongDto editSong(@PathVariable Long id, @RequestBody SongEditRequest req) {
         return SongDto.from(adminService.editSong(id, req));
     }
 
-    /** 删除记录（P2.5，不删 NAS 文件） */
+    /**
+     * 删除记录（P2.5，不删 NAS 文件）。
+     *
+     * Delete a song record (P2.5, NAS files are not deleted).
+     * @param id song ID
+     * @return deletion confirmation
+     */
     @DeleteMapping("/songs/{id}")
     public Map<String, String> deleteSong(@PathVariable Long id) {
         adminService.deleteSong(id);
         return Map.of("status", "deleted");
     }
 
+    /**
+     * 批量删除曲目。
+     *
+     * Batch delete songs by ID list.
+     * @param request request containing song IDs to delete
+     * @return deletion result with deleted count
+     */
     @DeleteMapping("/songs")
     public Map<String, Object> deleteSongs(@RequestBody SongIdsRequest request) {
         return Map.of("status", "deleted", "deleted", adminService.deleteSongs(request.ids()));
     }
 
-    /** 伴奏轨低置信度复核列表：入库判不准原伴唱、需人工核对的文件源 */
+    /**
+     * 伴奏轨低置信度复核列表：入库判不准原伴唱、需人工核对的文件源。
+     *
+     * Low-confidence accompaniment track review list: source files whose vocal/accompaniment
+     * classification is uncertain and require manual verification.
+     * @param page page number (0-based)
+     * @param size page size
+     * @return paginated vocal review list
+     */
     @GetMapping("/vocal-review")
     public Map<String, Object> vocalReview(@RequestParam(defaultValue = "0") int page,
                                            @RequestParam(defaultValue = "20") int size) {
@@ -201,7 +332,15 @@ public class AdminScanController {
         );
     }
 
-    /** 人工确认伴奏轨 index（0-based），标为高置信度、脱离复核列表 */
+    /**
+     * 人工确认伴奏轨 index（0-based），标为高置信度、脱离复核列表。
+     *
+     * Manually confirm the accompaniment track index (0-based), marking it high-confidence
+     * and removing it from the review list.
+     * @param fileId source file ID
+     * @param body request body containing accompanimentIndex
+     * @return confirmation result
+     */
     @PutMapping("/files/{fileId}/vocal-track")
     public Map<String, Object> confirmVocalTrack(@PathVariable Long fileId,
                                                  @RequestBody Map<String, Object> body) {
@@ -210,13 +349,24 @@ public class AdminScanController {
         return Map.of("status", "confirmed", "fileId", fileId, "accompanimentIndex", index);
     }
 
-    /** 读取设置（P2.6） */
+    /**
+     * 读取设置（P2.6）。
+     *
+     * Read all settings (P2.6).
+     * @return current settings map
+     */
     @GetMapping("/settings")
     public Map<String, Object> getSettings() {
         return settingService.getAll();
     }
 
-    /** 写入设置（P2.6） */
+    /**
+     * 写入设置（P2.6）。
+     *
+     * Write/update settings (P2.6).
+     * @param settings key-value settings to apply
+     * @return updated settings map
+     */
     @PutMapping("/settings")
     public Map<String, Object> putSettings(@RequestBody Map<String, Object> settings) {
         if (Boolean.TRUE.equals(settings.get("transcode_hardware_acceleration"))) {
@@ -229,21 +379,47 @@ public class AdminScanController {
         return settingService.getAll();
     }
 
+    /**
+     * 检测转码硬件加速能力。
+     *
+     * Detect transcode hardware acceleration capabilities.
+     * @return hardware status including available codecs
+     */
     @GetMapping("/settings/transcode-hardware")
     public TranscodeHardwareService.HardwareStatus transcodeHardware() {
         return transcodeHardwareService.detect();
     }
 
+    /**
+     * 重置转码配置为默认值。
+     *
+     * Reset transcode settings to their default values.
+     * @return default transcode settings map
+     */
     @PostMapping("/settings/transcode-defaults")
     public Map<String, Object> resetTranscodeDefaults() {
         return settingService.resetTranscodeDefaults();
     }
 
+    /**
+     * 预览歌曲重新解析的结果。
+     *
+     * Preview the result of re-parsing songs without applying changes.
+     * @param request request containing song IDs and parse rule
+     * @return preview results for each song
+     */
     @PostMapping("/songs/reparse/preview")
     public List<SongReparseService.Preview> previewReparse(@RequestBody ReparseRequest request) {
         return reparseService.preview(request.songIds(), request.rule());
     }
 
+    /**
+     * 应用歌曲重新解析并持久化变更。
+     *
+     * Apply song re-parsing and persist the changes.
+     * @param request request containing song IDs and parse rule
+     * @return apply result including updated song count
+     */
     @PostMapping("/songs/reparse/apply")
     public SongReparseService.ApplyResult applyReparse(@RequestBody ReparseRequest request) {
         return reparseService.apply(request.songIds(), request.rule());

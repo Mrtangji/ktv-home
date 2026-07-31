@@ -19,14 +19,22 @@ public final class FilenameParser {
     }
 
     public static ParsedMeta parse(String filename, String rule) {
-        String base = stripExtension(filename);
+        String base = stripExtension(filename).trim();
         if (base.isBlank()) return ParsedMeta.unrecognized(base);
+
+        // Strip catalogue numbers and transport/version markers before identifying fields.
+        base = base.replaceFirst("^\\s*\\d{1,5}\\s*[-._)】]\\s*", "");
+        base = base.replaceAll("\\s*\\[(?:KTV|MTV|MV|LIVE|伴奏|原唱|消音|卡拉OK)\\]\\s*$", "");
+        base = base.replaceAll("\\s*\\((?:KTV|MTV|MV|LIVE|伴奏|原唱|消音|卡拉OK|Official Video)\\)\\s*$", "");
+        base = base.replaceAll("(?i)\\s*[-|]\\s*(KTV|MTV|MV|LIVE|伴奏|原唱|消音|卡拉OK)\\s*$", "");
 
         // 统一常见分隔符为标准 " - "
         String normalized = base
                 .replace('－', '-')   // 全角连字符
                 .replace('—', '-')    // 破折号
-                .replace('_', '-');
+                .replace('_', '-')
+                .replace('–', '-')
+                .replace('｜', '|');
 
         // 用 " - " 或 "-" 分隔（优先带空格的）
         String[] parts = splitByDash(normalized);
@@ -35,25 +43,32 @@ public final class FilenameParser {
             return ParsedMeta.of(base.trim(), "");
         }
 
-        String left = parts[0].trim();
-        String right = parts[1].trim();
+        String left = cleanPart(parts[0]);
+        String right = cleanPart(parts[1]);
         if (left.isEmpty() || right.isEmpty()) {
             return ParsedMeta.of(base.trim(), "");
         }
+        if (left.matches("(?i)track|track\\s*\\d*") && right.matches("\\d{2,}")) {
+            return ParsedMeta.unrecognized(base.trim());
+        }
 
+        // For a name containing several separators, the first/last non-marker segment
+        // is usually the catalogue suffix; retain it in the title rather than swapping identities.
         return "title_artist".equals(rule) ? ParsedMeta.of(left, right) : ParsedMeta.of(right, left);
     }
 
     private static String[] splitByDash(String s) {
-        int idx = s.indexOf(" - ");
-        if (idx >= 0) {
-            return new String[]{ s.substring(0, idx), s.substring(idx + 3) };
-        }
-        idx = s.indexOf('-');
-        if (idx > 0 && idx < s.length() - 1) {
-            return new String[]{ s.substring(0, idx), s.substring(idx + 1) };
+        for (String delimiter : new String[]{" - ", "|", "/", "\\\\", "-"}) {
+            int idx = s.indexOf(delimiter);
+            if (idx > 0 && idx < s.length() - delimiter.length()) {
+                return new String[]{ s.substring(0, idx), s.substring(idx + delimiter.length()) };
+            }
         }
         return null;
+    }
+
+    private static String cleanPart(String value) {
+        return value.replaceAll("^\\s*[【\\[][^】\\]]+[】\\]]\\s*", "").trim();
     }
 
     static String stripExtension(String filename) {

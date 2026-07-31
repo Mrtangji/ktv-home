@@ -16,6 +16,9 @@ import java.util.concurrent.TimeUnit
  * now_playing 快照只携带 song.id，而拉流接口 GET /api/stream/{file_id} 需要
  * file_id（= song_files.id）。播放前先拉 GET /api/songs/{id} 详情，从 files
  * 里取 priority 最高的文件源，得到 fileId（顺带拿 vocalTrackIndex 供 P1.29 切轨）。
+ *
+ * The TV REST client resolves the highest-priority file source before playback
+ * and also provides the vocal track index used by P1.29 track switching.
  */
 class MediaApi(private val config: AppConfig) {
 
@@ -26,7 +29,11 @@ class MediaApi(private val config: AppConfig) {
         .readTimeout(8, TimeUnit.SECONDS)
         .build()
 
-    /** 拉歌曲详情，返回 priority 最高的文件源；失败或无文件返回 null。 */
+    /**
+     * 拉歌曲详情，返回 priority 最高的文件源；失败或无文件返回 null。
+     *
+     * Fetches song details and returns the highest-priority file source, or null on failure.
+     */
     suspend fun bestFileSource(songId: Long): FileSource? = withContext(Dispatchers.IO) {
         val url = "${config.apiBase()}/songs/$songId"
         try {

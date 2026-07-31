@@ -9,6 +9,9 @@ import java.time.OffsetDateTime;
 /**
  * 单行播放器状态（房间唯一事实源），对应 player_state 表（详设§10）。
  * 主键固定为 1（数据库 CHECK 约束保证单行）。
+ *
+ * Single-row player state (the room's single source of truth), mapping to the player_state table (detailed design §10).
+ * Primary key is fixed to 1 (enforced by a database CHECK constraint for single row).
  */
 @Entity
 @Table(name = "player_state")
@@ -23,6 +26,7 @@ public class PlayerState {
     private Long currentQueueId;
 
     /** idle / playing / paused */
+    // English: idle / playing / paused
     @Column(nullable = false)
     private String state = "idle";
 
@@ -33,12 +37,15 @@ public class PlayerState {
     private boolean muted = false;
 
     /** original / accompaniment */
+    // English: original / accompaniment
     @Column(name = "vocal_mode", nullable = false)
     private String vocalMode = "accompaniment";
 
     @Generated(event = EventType.INSERT)
     @Column(name = "updated_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime updatedAt;
+
+    // ---- getters / setters ----
 
     public Short getId() { return id; }
     public void setId(Short id) { this.id = id; }

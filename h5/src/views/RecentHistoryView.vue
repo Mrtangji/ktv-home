@@ -19,6 +19,13 @@
 </template>
 
 <script setup>
+/**
+ * 最近演唱历史页面 —— 展示今晚已唱过的歌曲，支持按"全部/我唱的"筛选，
+ * 并可一键将历史歌曲重新加入演唱队列。
+ *
+ * Recent history page — shows songs sung tonight, supports filtering by
+ * "All / Mine", and allows one-tap re-adding to the singing queue.
+ */
 import { onMounted, ref } from 'vue'
 import api from '../api/client'
 import { useUserStore } from '../stores/user'
@@ -34,11 +41,25 @@ const mineOnly = ref(false)
 const busyId = ref(null)
 
 onMounted(load)
+/**
+ * 加载最近演唱历史列表。
+ *
+ * Loads the recent singing history list.
+ */
 async function load() {
   loading.value = true
   try { items.value = await api.recentHistory(user.clientToken, mineOnly.value) } catch { items.value = [] } finally { loading.value = false }
 }
+/** 切换筛选模式（全部/我唱的）并重新加载。 / Toggle filter mode (all/mine) and reload. */
 function setMine(value) { mineOnly.value = value; load() }
+/**
+ * 将历史歌曲重新加入演唱队列。若歌曲已在队列中，弹窗确认后强制重复加入。
+ * @param {Object} item - 历史记录条目，含 historyId、song 等字段
+ *
+ * Re-adds a historical song to the singing queue. If the song is already
+ * queued, prompts for confirmation before forcing it in.
+ * @param {Object} item - History entry with historyId, song, etc.
+ */
 async function repeat(item) {
   busyId.value = item.historyId
   try {
@@ -53,6 +74,15 @@ async function repeat(item) {
     } else toast(error.message || '再唱失败')
   } finally { busyId.value = null }
 }
+/**
+ * 格式化演唱时间：当天显示时分（如 21:30），非当天显示月/日（如 7/31）。
+ * @param {string|number|Date} value - 时间值
+ * @returns {string} 格式化后的时间文本
+ *
+ * Formats play time: today shows HH:MM, other days show M/D.
+ * @param {string|number|Date} value - Time value
+ * @returns {string} Formatted time string
+ */
 function timeText(value) {
   if (!value) return ''
   const date = new Date(value)

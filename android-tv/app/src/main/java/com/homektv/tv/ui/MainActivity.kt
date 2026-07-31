@@ -1,6 +1,7 @@
 package com.homektv.tv.ui
 
 import android.Manifest
+import android.animation.ObjectAnimator
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
@@ -10,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.KeyEvent
 import android.widget.Toast
 import android.widget.TextView
@@ -95,6 +97,7 @@ class MainActivity : AppCompatActivity(), KtvSocket.Listener {
     private var standbyCarouselEnabled = true
     private var antiBurnEnabled = true
     private var standbyIntervalMs = 8_000L
+    private val standbyMotionAnimators = mutableListOf<ObjectAnimator>()
     private var currentPlaybackState = "idle"
     private var hasCurrentSong = false
     private val standbyTicker = object : Runnable {
@@ -150,6 +153,7 @@ class MainActivity : AppCompatActivity(), KtvSocket.Listener {
         mediaApi = MediaApi(config)
         loadQr()
         loadStandbyContent()
+        startStandbyMotion()
         binding.standbyPanel.post(standbyTicker)
         binding.standbyPanel.postDelayed(burnInTicker, 60_000L)
         binding.standbyPanel.post(standbySettingsTicker)
@@ -214,6 +218,8 @@ class MainActivity : AppCompatActivity(), KtvSocket.Listener {
     }
 
     override fun onDestroy() {
+        standbyMotionAnimators.forEach(ObjectAnimator::cancel)
+        standbyMotionAnimators.clear()
         socket?.close()
         clock.removeCallbacks(clockTick)
         clock.removeCallbacks(progressHide)
@@ -646,6 +652,27 @@ class MainActivity : AppCompatActivity(), KtvSocket.Listener {
         }
     }
 
+    private fun startStandbyMotion() {
+        binding.qrPanel.post {
+            ObjectAnimator.ofFloat(binding.qrPanel, View.SCALE_X, 1f, 1.012f).apply {
+                duration = 1_800L
+                repeatCount = ObjectAnimator.INFINITE
+                repeatMode = ObjectAnimator.REVERSE
+                interpolator = AccelerateDecelerateInterpolator()
+                standbyMotionAnimators += this
+                start()
+            }
+            ObjectAnimator.ofFloat(binding.qrPanel, View.SCALE_Y, 1f, 1.012f).apply {
+                duration = 1_800L
+                repeatCount = ObjectAnimator.INFINITE
+                repeatMode = ObjectAnimator.REVERSE
+                interpolator = AccelerateDecelerateInterpolator()
+                standbyMotionAnimators += this
+                start()
+            }
+        }
+    }
+
     // ---- 待机页二维码（P1.30） ----
 
     /** 异步拉 /api/qr 加载进待机页占位框；失败保留占位文字（用户仍可读明文地址）。 */
@@ -689,7 +716,8 @@ class MainActivity : AppCompatActivity(), KtvSocket.Listener {
         binding.txtRecommendationsEmpty.visibility = if (recommendations.isEmpty()) View.VISIBLE else View.GONE
         if (recommendations.isNotEmpty()) renderRecommendationCards()
         if (content.logoUrl == null) {
-            binding.imgStandbyLogo.visibility = View.GONE
+            binding.imgStandbyLogo.setImageResource(R.drawable.home_ktv_logo)
+            binding.imgStandbyLogo.visibility = View.VISIBLE
             binding.txtBrandName.visibility = View.VISIBLE
         } else {
             lifecycleScope.launch {
@@ -724,7 +752,7 @@ class MainActivity : AppCompatActivity(), KtvSocket.Listener {
             val cover = ImageView(this).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
                 setBackgroundColor(getColor(R.color.panel))
-                setImageResource(R.drawable.ic_logo_foreground)
+                setImageResource(R.drawable.home_ktv_logo)
                 recommendationCovers[song.id]?.let(::setImageBitmap)
             }
             card.addView(cover, LinearLayout.LayoutParams(dp(50), dp(50)))
@@ -882,8 +910,8 @@ class MainActivity : AppCompatActivity(), KtvSocket.Listener {
     }
 
     companion object {
-        /** 二维码请求边长（服务端在 [120,1080] 内钳制）；占位框 220dp，取 480 兼顾清晰。 */
-        private const val QR_SIZE_PX = 480
+        /** 二维码请求边长（服务端在 [120,1080] 内钳制）；待机占位框 220dp，取 540 兼顾高密度电视清晰度。 */
+        private const val QR_SIZE_PX = 540
         private const val PROGRESS_HIDE_DELAY_MS = 5_000L
         private const val VOCAL_CHANGED_EVENT = "vocal_changed"
         private const val PLAYBACK_RESTARTED_EVENT = "playback_restarted"

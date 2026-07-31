@@ -2,9 +2,13 @@
   <div class="page">
     <header class="top"><button @click="$router.back()">‹</button><strong>主题歌单</strong><span></span></header>
     <main>
+      <!-- 顶部标题区 / Hero banner -->
       <div class="hero"><div class="spark">✨</div><h1>今晚唱什么</h1><p>根据曲风、年代和聚会主题整理的精选歌单</p></div>
+      <!-- 加载状态 / Loading state -->
       <div v-if="loading" class="tip">加载中…</div>
+      <!-- 空数据提示 / Empty state -->
       <div v-else-if="!playlists.length" class="tip">暂无公开歌单，请先在管理后台生成</div>
+      <!-- 歌单卡片列表 / Playlist card list -->
       <router-link v-for="playlist in playlists" :key="playlist.id" class="card" :to="{ name: 'playlist-detail', params: { id: playlist.id } }">
         <div class="cover" :style="playlist.coverUrl ? { backgroundImage: `url(${playlist.coverUrl})` } : {}"><span v-if="!playlist.coverUrl">{{ coverEmoji(playlist.theme) }}</span><em v-if="playlist.aiGenerated">AI</em></div>
         <div class="info"><h2>{{ playlist.name }}</h2><p>{{ playlist.description || playlist.theme || '家庭欢唱精选' }}</p><small>{{ playlist.songCount }} 首 · {{ previewText(playlist.preview) }}</small></div>
@@ -16,21 +20,53 @@
 </template>
 
 <script setup>
+/**
+ * 主题歌单列表页 —— 展示按曲风、年代、聚会主题整理的精选歌单。
+ * 支持 AI 生成标记，点击卡片进入歌单详情。
+ *
+ * Theme playlist list page — displays curated playlists organized by genre,
+ * era, and party theme. Supports AI-generated badges and links to detail view.
+ */
 import { onMounted, ref } from 'vue'
 import api from '../api/client'
 import TabBar from '../components/TabBar.vue'
 
+/** 歌单列表 / Playlist list */
 const playlists = ref([])
+/** 是否正在加载 / Is loading */
 const loading = ref(true)
+
+// 挂载后拉取歌单列表 / Fetch playlist list on mount
 onMounted(async () => { try { playlists.value = await api.playlists() } finally { loading.value = false } })
+
+/**
+ * 将歌曲数组拼接为预览文本，用顿号分隔。
+ * 若数组为空或全为假值则返回默认占位文案。
+ *
+ * Joins song titles into a preview string separated by "、".
+ * Falls back to a placeholder when the array is empty or all falsy.
+ *
+ * @param {Array<{title?: string}>} values - 歌曲对象数组 / array of song objects
+ * @returns {string} 预览文本 / preview text
+ */
 function previewText(values = []) { return values.filter(Boolean).map(song => song.title).join('、') || '等待添加歌曲' }
+/**
+ * 根据歌单主题关键词返回对应的封面 emoji。
+ * 匹配儿歌/儿童、摇滚/热血、情歌/浪漫、怀旧/年代/经典、对唱/合唱等场景。
+ *
+ * Returns a cover emoji based on playlist theme keywords.
+ * Matches children's songs, rock, love songs, retro/classics, and duets.
+ *
+ * @param {string} theme - 歌单主题标签 / playlist theme tag
+ * @returns {string} emoji 字符 / emoji character
+ */
 function coverEmoji(theme = '') {
-  if (/儿歌|儿童/.test(theme)) return '🧸'
-  if (/摇滚|热血/.test(theme)) return '🎸'
-  if (/情歌|浪漫/.test(theme)) return '💞'
-  if (/怀旧|年代|经典/.test(theme)) return '📻'
-  if (/对唱|合唱/.test(theme)) return '👥'
-  return '🎶'
+  if (/儿歌|儿童/.test(theme)) return '🧸' // 儿歌 / children
+  if (/摇滚|热血/.test(theme)) return '🎸'  // 摇滚 / rock
+  if (/情歌|浪漫/.test(theme)) return '💞'  // 情歌 / love songs
+  if (/怀旧|年代|经典/.test(theme)) return '📻' // 怀旧 / retro
+  if (/对唱|合唱/.test(theme)) return '👥'  // 对唱/合唱 / duets
+  return '🎶' // 默认 / default
 }
 </script>
 

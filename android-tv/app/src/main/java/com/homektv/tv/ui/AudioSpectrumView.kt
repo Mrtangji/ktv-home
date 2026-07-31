@@ -10,6 +10,11 @@ import android.view.View
 import kotlin.math.abs
 import kotlin.math.sin
 
+/**
+ * 音频频谱装饰视图，根据麦克风采样绘制动态柱状效果。
+ *
+ * Decorative audio-spectrum view that draws animated bars from microphone samples.
+ */
 class AudioSpectrumView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,

@@ -19,6 +19,10 @@ import java.util.Collections;
 /**
  * 队列状态机：点歌/顶歌/删歌（P1.9，详设§4.4）。
  * order_index 用分数插入，避免整列重排。
+ *
+ * Queue state machine for ordering, promoting, and cancelling songs (P1.9,
+ * Detailed Design §4.4). Fractional order_index values avoid reordering the
+ * entire column when inserting items.
  */
 @Service
 public class QueueService {
@@ -101,7 +105,12 @@ public class QueueService {
         return queueRepo.save(item);
     }
 
-    /** 删歌：本人可删自己点的等待歌曲；权限校验由调用方（control）处理 */
+    /**
+     * 删歌：本人可删自己点的等待歌曲；权限校验由调用方（control）处理。
+     *
+     * Cancel a waiting song ordered by the current user; the caller performs
+     * permission validation.
+     */
     @Transactional
     public void cancel(Long queueId) {
         QueueItem item = queueRepo.findById(queueId)

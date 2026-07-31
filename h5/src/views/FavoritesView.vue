@@ -2,9 +2,11 @@
   <div class="page">
     <header class="top"><button @click="$router.back()">‹</button><strong>我的收藏</strong><span>{{ songs.length }} 首</span></header>
     <main>
+      <!-- 收藏页头部 / Favorites header -->
       <div class="intro"><span>❤️</span><div><h1>喜欢的歌</h1><p>收藏保存在当前手机身份下</p></div></div>
       <div v-if="loading" class="tip">加载中…</div>
       <div v-else-if="!songs.length" class="empty"><span>♡</span><strong>还没有收藏歌曲</strong><p>在歌曲右侧点爱心即可收藏</p></div>
+      <!-- 歌曲列表（含点歌按钮） / Song list with queuing -->
       <div v-else class="list">
         <SongRow v-for="song in songs" :key="song.id" :song="song" :ordered="orderedIds.has(song.id)" @order="order" />
       </div>
@@ -14,6 +16,14 @@
 </template>
 
 <script setup>
+/**
+ * 收藏页面 — 展示用户收藏的歌曲列表，支持点歌操作。
+ * 收藏数据与当前手机身份绑定，切换身份后数据不同。
+ *
+ * Favorites page — displays the user's favorited songs and supports queuing.
+ * Favorites are tied to the current device identity and differ across identities.
+ */
+
 import { onMounted, reactive, ref, watch } from 'vue'
 import api, { makeControls } from '../api/client'
 import SongRow from '../components/SongRow.vue'
@@ -35,6 +45,13 @@ watch(() => favorites.ids.slice(), ids => {
   songs.value = songs.value.filter(song => ids.includes(song.id))
 })
 
+/**
+ * 加载收藏歌曲列表，同时同步收藏 ID 到 store。
+ * 失败时清空列表，避免展示过期数据。
+ *
+ * Loads the favorites song list and syncs favorite IDs to the store.
+ * On failure, clears the list to avoid showing stale data.
+ */
 async function load() {
   loading.value = true
   try {
@@ -47,6 +64,17 @@ async function load() {
   }
 }
 
+/**
+ * 将歌曲加入播放队列（点歌）。
+ * 成功后将 song.id 标记为已点，避免重复操作。
+ *
+ * @param {Object} song - 歌曲对象，需包含 id 属性。
+ *
+ * Queues a song for playback.
+ * On success, marks the song id as ordered to prevent duplicate operations.
+ *
+ * @param {Object} song - Song object, must contain an id property.
+ */
 async function order(song) {
   try {
     await controls.order(song.id)

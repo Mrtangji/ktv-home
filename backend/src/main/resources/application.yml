@@ -24,6 +24,7 @@ app:
   source-library-path: ${KTV_SOURCE_LIBRARY_PATH:/source-music}
   ktv-library-path: ${KTV_LIBRARY_PATH:/music}
   data-path: ${KTV_DATA_PATH:./data}
+  config-master-key-path: ${KTV_CONFIG_MASTER_KEY_PATH:/data/secrets/config.key}
   ffprobe-path: ${KTV_FFPROBE_PATH:ffprobe}
   transcode:
     ffmpeg-path: ${KTV_FFMPEG_PATH:ffmpeg}
@@ -36,9 +37,14 @@ app:
     udp-port: ${KTV_DISCOVERY_UDP_PORT:18888}
   ai:
     enabled: ${KTV_AI_ENABLED:false}
-    base-url: ${KTV_AI_BASE_URL:https://api.deepseek.com}
+    base-url: ${KTV_AI_BASE_URL:}
     api-key: ${KTV_AI_API_KEY:}
-    model: ${KTV_AI_MODEL:deepseek-v4-flash}
+    model: ${KTV_AI_MODEL:}
+    bulk-model: ${KTV_AI_BULK_MODEL:${KTV_AI_MODEL:}}
+    reasoning-model: ${KTV_AI_REASONING_MODEL:}
+    json-mode: ${KTV_AI_JSON_MODE:AUTO}
+    bulk-concurrency: ${KTV_AI_BULK_CONCURRENCY:2}
+    reasoning-concurrency: ${KTV_AI_REASONING_CONCURRENCY:1}
     auto-apply-confidence: ${KTV_AI_AUTO_APPLY_CONFIDENCE:0.90}
     connect-timeout-seconds: 10
     read-timeout-seconds: 60

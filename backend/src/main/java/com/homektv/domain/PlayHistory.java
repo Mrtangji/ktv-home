@@ -8,24 +8,36 @@ import java.time.OffsetDateTime;
 
 /**
  * 已播历史，对应 play_history 表（详设§10）。
+ *
+ * Play history record, corresponding to the play_history table (detail design §10).
  */
 @Entity
 @Table(name = "play_history")
 public class PlayHistory {
 
+    /** 主键ID。 */
+    // English: Primary key ID.
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /** 歌曲ID。 */
+    // English: Song ID.
     @Column(name = "song_id", nullable = false)
     private Long songId;
 
+    /** 点歌人ID。 */
+    // English: ID of the user who requested the song.
     @Column(name = "played_by")
     private Long playedBy;
 
+    /** 播放时间。 */
+    // English: Playback timestamp.
     @Generated(event = EventType.INSERT)
     @Column(name = "played_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime playedAt;
+
+    // ---- getters / setters ----
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }

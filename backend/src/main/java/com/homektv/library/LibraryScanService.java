@@ -25,6 +25,11 @@ import java.util.*;
  * 曲库扫描入库管线（P1.1-P1.5，详设§9.3）。
  * 枚举文件 → ffprobe 探测 → 标签解析 → 文件名兜底 → 类型判定
  * → 指纹去重 → 拼音字段 → 歌词/封面落盘 → 写 songs/song_files。
+ *
+ * Library scanning and ingestion pipeline (P1.1-P1.5, Detailed Design §9.3).
+ * Enumerates files, probes media, parses tags, applies filename fallbacks,
+ * classifies media, deduplicates by fingerprint, generates Pinyin fields,
+ * stores lyrics/covers, and persists songs/song_files.
  */
 @Service
 public class LibraryScanService {
@@ -142,19 +147,35 @@ public class LibraryScanService {
             return new IngestState(IngestOutcome.SKIPPED, null, null);
         }
 
-        // 2) 标签解析 + 3) 文件名兜底
+        // 2) 标签解析 + 容器标签 + LRC + 3) 文件名兜底
         TagInfo tag = tagReader.read(file.toFile());
+        String sidecarLyricText = readValidSidecarLyric(sidecarLyric);
+        String lrcTitle = lrcTag(sidecarLyricText, "ti");
+        String lrcArtist = lrcTag(sidecarLyricText, "ar");
         boolean recognized;
         String title, artist;
+        String identitySource;
         if (tag.hasTitle()) {
             title = tag.getTitle();
             artist = tag.getArtist() != null ? tag.getArtist() : "";
             recognized = true;
+            identitySource = "audio_tag";
+        } else if (probe.title() != null && !probe.title().isBlank()) {
+            title = probe.title();
+            artist = probe.artist() == null ? "" : probe.artist();
+            recognized = true;
+            identitySource = "container_tag";
+        } else if (lrcTitle != null && !lrcTitle.isBlank()) {
+            title = lrcTitle;
+            artist = lrcArtist == null ? "" : lrcArtist;
+            recognized = true;
+            identitySource = "lrc_tag";
         } else {
             ParsedMeta pm = FilenameParser.parse(file.getFileName().toString());
             title = pm.title();
             artist = pm.artist();
             recognized = pm.recognized();
+            identitySource = "filename";
         }
         if (artist == null || artist.isBlank()) artist = "未知歌手";
 
@@ -186,12 +207,14 @@ public class LibraryScanService {
             song.setFingerprint(fingerprint);
             // 未识别（标签+文件名均无有效歌名）标记 unrecognized，供后台筛选补录；否则 ok
             song.setStatus(recognized ? "ok" : "unrecognized");
-            if (tag.getLanguage() != null) song.setLanguage(tag.getLanguage());
+            if (tag.getLanguage() != null && !tag.getLanguage().isBlank()) song.setLanguage(normalizeLanguage(tag.getLanguage()));
+            else if (probe.language() != null && !probe.language().isBlank()) song.setLanguage(normalizeLanguage(probe.language()));
+            song.setMetadataProvenance("{\"title\":{\"source\":\"" + identitySource + "\"},\"artist\":{\"source\":\"" + identitySource + "\"}}");
+            song.setNeedsAiOptimization(!recognized || "未知".equals(song.getLanguage()) || "未知歌手".equals(song.getArtist()));
             isNew = true;
         }
 
         // 6) 歌词/封面落盘。同名增强 LRC 优先，且允许侧车文件独立更新。
-        String sidecarLyricText = readValidSidecarLyric(sidecarLyric);
         if (sidecarLyricText != null) {
             String lyricPath = assetWriter.writeLyric(fingerprint, sidecarLyricText);
             song.setLyricPath(lyricPath);
@@ -310,6 +333,25 @@ public class LibraryScanService {
             log.warn("读取同名歌词失败：{} - {}", sidecarLyric, e.getMessage());
             return null;
         }
+    }
+
+    private static String lrcTag(String lyric, String key) {
+        if (lyric == null) return null;
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(?im)^\\[" + key + "\\s*:\\s*(.+?)\\]\\s*$").matcher(lyric);
+        return matcher.find() ? matcher.group(1).trim() : null;
+    }
+
+    private static String normalizeLanguage(String raw) {
+        String value = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+        if (value.isBlank()) return "未知";
+        if (value.matches("zh(-|_)?cn|中文|mandarin|国语|普通话")) return "国语";
+        if (value.matches("yue|zh(-|_)?hk|粤语|cantonese")) return "粤语";
+        if (value.matches("nan|闽南语|台语|hokkien")) return "闽南语";
+        if (value.matches("en|英语|英文|english")) return "英语";
+        if (value.matches("ja|日语|日文|japanese")) return "日语";
+        if (value.matches("ko|韩语|韩文|korean")) return "韩语";
+        if (value.matches("instrumental|纯音乐|music")) return "纯音乐";
+        return Set.of("国语", "粤语", "闽南语", "英语", "日语", "韩语", "纯音乐", "其他", "未知").contains(raw) ? raw : "其他";
     }
 
     private static long sizeOf(Path file) {

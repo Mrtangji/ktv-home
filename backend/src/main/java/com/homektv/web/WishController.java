@@ -10,6 +10,8 @@ import java.util.Map;
 
 /**
  * 心愿单（P3.3，详设§11.1）：H5 无结果提交，后台查看/导出。
+ *
+ * Wishlist (P3.3, DS §11.1): H5 submission with no results; backend view/export.
  */
 @RestController
 @RequestMapping("/api")
@@ -23,7 +25,13 @@ public class WishController {
         this.userService = userService;
     }
 
-    /** 提交心愿（缺歌反馈） */
+    /**
+     * 提交心愿（缺歌反馈）。
+     *
+     * Submit a wish (missing song feedback).
+     * @param body 请求体，包含 keyword 和 client_token
+     * @return 包含 status 的 Map
+     */
     @PostMapping("/wishes")
     public Map<String, Object> add(@RequestBody Map<String, String> body) {
         String keyword = body.get("keyword");
@@ -37,7 +45,12 @@ public class WishController {
         return Map.of("status", "ok");
     }
 
-    /** 心愿单列表（后台查看/导出） */
+    /**
+     * 心愿单列表（后台查看/导出）。
+     *
+     * Wishlist entries (backend view/export).
+     * @return 心愿单列表，按创建时间降序排列
+     */
     @GetMapping("/wishes")
     public List<Wish> list() {
         return wishRepo.findAllByOrderByCreatedAtDesc();

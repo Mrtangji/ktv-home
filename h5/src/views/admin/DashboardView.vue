@@ -1,12 +1,15 @@
 <template>
   <AdminLayout active="dashboard">
     <header class="page-head"><div><h1>仪表盘</h1><p>扫描源路径并查看曲库、转码与播放服务状态</p></div><button class="primary" :disabled="scanning" @click="scan">{{ scanning ? '扫描中…' : '扫描源路径' }}</button></header>
+    <!-- 统计卡片 / Stats cards -->
     <section class="stats"><article><span>原始素材</span><strong>{{ sourceTotal }}</strong><small>/source-music</small></article><article><span>KTV曲库</span><strong>{{ d.totalSongs ?? 0 }}</strong><small>/music，可点歌</small></article><article><span>待转码</span><strong>{{ pendingCount }}</strong><small>等待批量转码入库</small></article><article><span>未识别</span><strong>{{ d.unrecognizedCount ?? 0 }}</strong><small>需补录元数据</small></article></section>
+    <!-- 扫描进度 / Scan progress -->
     <section v-if="scanning || scanResult" class="scan-progress" :class="{complete:!scanning}">
       <div class="progress-head"><div><strong>{{ scanning ? '正在扫描源路径' : '扫描完成' }}</strong><span v-if="scanning">{{ scanProgress.currentFile || '正在读取文件列表…' }}</span><span v-else>{{ scanResult.finishedAt ? `完成于 ${formatTime(scanResult.finishedAt)}` : '' }}</span></div><b>{{ scanPercent }}%</b></div>
       <div class="track"><i :style="{width:`${scanPercent}%`}"></i></div>
       <div class="progress-meta"><span>已处理 {{ scanProgress.completed || 0 }} / {{ scanProgress.total || 0 }}</span><span>直拷 {{ scanProgress.copied || 0 }}</span><span>待转码 {{ scanProgress.pendingTranscode || 0 }}</span><span>重复 {{ duplicateCount }}</span><span>未识别 {{ scanProgress.unrecognized || 0 }}</span><span :class="{'failed':scanProgress.failed}">失败 {{ scanProgress.failed || 0 }}</span></div>
     </section>
+    <!-- 运行状态面板 / Status panel -->
     <section class="panel"><div class="panel-head"><strong>运行状态</strong><button class="text-btn" @click="load">刷新</button></div><table><thead><tr><th>模块</th><th>当前状态</th><th>详情</th><th>操作</th></tr></thead><tbody>
       <tr><td><strong>源路径扫描</strong><small>分析、去重、自动直拷</small></td><td><span class="status green">{{ scanning ? '扫描中' : '就绪' }}</span></td><td>需转码文件只进入待处理列表，不会在扫描时自动转码。</td><td><button class="link" @click="scan" :disabled="scanning">重新扫描</button></td></tr>
       <tr><td><strong>批量转码</strong><small>原始音乐管理任务</small></td><td><span class="status" :class="progress.running?'blue':'neutral'">{{ progress.running ? '进行中' : '空闲' }}</span></td><td>{{ progress.running ? `${progress.completed}/${progress.total}，当前：${progress.currentFile || '准备中'}` : lastProgressText }}</td><td><router-link class="link" :to="{name:'admin-source-library'}">查看进度</router-link></td></tr>
@@ -15,23 +18,97 @@
   </AdminLayout>
 </template>
 <script setup>
+/**
+ * 管理后台仪表盘页面 —— 展示源路径扫描、曲库统计、批量转码与播放服务状态。
+ *
+ * Admin dashboard page — displays source scan status, song library stats,
+ * batch transcoding progress, and playback service status.
+ */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import api from '../../api/client'
 import AdminLayout from './AdminLayout.vue'
 import { alertDialog } from '../../composables/useDialog'
 const d=ref({}),queue=ref({}),progress=ref({}),scanning=ref(false),scanResult=ref(null),scanProgress=ref({}),sourceTotal=ref(0),pendingCount=ref(0)
 let scanTimer=null
+/**
+ * 播放队列当前状态的中文映射。
+ *
+ * Chinese label for the current playback queue state.
+ */
 const queueState=computed(()=>({playing:'播放中',paused:'已暂停',idle:'空闲'}[queue.value.state]||'空闲'))
+/**
+ * 上次批量转码完成时的文本摘要。
+ *
+ * Text summary of the last batch transcoding run.
+ */
 const lastProgressText=computed(()=>progress.value.finishedAt?`上次完成：成功 ${progress.value.transcoded||0}，失败 ${progress.value.failed||0}`:'暂无批量转码记录')
+/**
+ * 扫描进度百分比（0–100），根据已完成数与总数计算。
+ *
+ * Scan progress percentage (0–100), computed from completed/total count.
+ */
 const scanPercent=computed(()=>scanProgress.value.total?Math.round((scanProgress.value.completed||0)*100/scanProgress.value.total):(scanning.value?0:100))
+/**
+ * 重复文件总数（源路径重复 + 输出路径重复）。
+ *
+ * Total duplicate file count (source duplicates + output duplicates).
+ */
 const duplicateCount=computed(()=>(scanProgress.value.skippedSourceDuplicate||0)+(scanProgress.value.skippedOutputDuplicate||0))
+/**
+ * 加载仪表盘全部数据：服务状态、队列、转码进度、源库统计、扫描进度。
+ * 若扫描正在运行则自动开启轮询；若已完成则展示结果。
+ *
+ * Load all dashboard data: service status, queue, transcoding progress,
+ * source library stats, and scan progress. Automatically starts polling
+ * if a scan is running, or shows the result if one has finished.
+ * @returns {Promise<void>}
+ */
 async function load(){const [status,q,p,sources,pending,sp]=await Promise.all([api.adminStatus().catch(()=>({})),api.getQueue().catch(()=>({})),api.adminSourceTranscodeProgress().catch(()=>({})),api.adminSourceLibrary({page:0,size:1}).catch(()=>({})),api.adminSourceLibrary({status:'pending',page:0,size:1}).catch(()=>({})),api.adminScanProgress().catch(()=>({}))]);d.value=status;queue.value=q;progress.value=p;sourceTotal.value=sources.total||0;pendingCount.value=pending.total||0;scanProgress.value=sp;if(sp.running){scanning.value=true;startPolling()}else if(sp.finishedAt){scanResult.value=sp}}
+
+/**
+ * 启动扫描进度轮询（每秒一次）。
+ *
+ * Start polling scan progress (once per second).
+ */
 function startPolling(){if(!scanTimer)scanTimer=setInterval(pollScan,1000)}
+
+/**
+ * 停止扫描进度轮询并清除定时器。
+ *
+ * Stop polling scan progress and clear the timer.
+ */
 function stopPolling(){if(scanTimer){clearInterval(scanTimer);scanTimer=null}}
+
+/**
+ * 轮询扫描进度；检测到扫描结束时自动停止轮询并刷新仪表盘数据。
+ *
+ * Poll scan progress; when scan completion is detected, stop polling
+ * and refresh dashboard data automatically.
+ * @returns {Promise<void>}
+ */
 async function pollScan(){const previous=scanning.value;const value=await api.adminScanProgress().catch(()=>scanProgress.value);scanProgress.value=value;scanning.value=!!value.running;if(previous&&!value.running){scanResult.value=value;stopPolling();await load()}}
+
+/**
+ * 触发源路径扫描，启动后自动轮询进度。
+ * 若已有扫描在运行则直接返回。
+ *
+ * Trigger a source path scan and start polling progress automatically.
+ * No-op if a scan is already running.
+ * @returns {Promise<void>}
+ */
 async function scan(){if(scanning.value)return;try{scanProgress.value=await api.adminStartScan();scanning.value=true;scanResult.value=null;startPolling()}catch(e){await alertDialog(e.message||'扫描失败')}}
+
+/**
+ * 将 ISO 时间字符串格式化为中文本地时间。
+ *
+ * Format an ISO time string as Chinese locale date/time.
+ * @param {string|number|Date} value - 时间值 / the time value to format
+ * @returns {string} 格式化后的本地时间 / formatted local time string
+ */
 function formatTime(value){return new Date(value).toLocaleString('zh-CN',{hour12:false})}
+/** 挂载时加载仪表盘数据。 / Load dashboard data on mount. */
 onMounted(load)
+/** 卸载时停止轮询。 / Stop polling on unmount. */
 onUnmounted(stopPolling)
 </script>
 <style scoped>

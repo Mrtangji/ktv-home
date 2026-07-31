@@ -4,6 +4,12 @@ import com.homektv.domain.MediaImportRecord;
 
 import java.time.OffsetDateTime;
 
+/**
+ * 媒体导入记录的数据传输对象，封装了导入记录的完整信息及其显示状态转换逻辑。
+ *
+ * Data Transfer Object for media import records, encapsulating full import record
+ * information along with display status transformation logic.
+ */
 public record MediaImportRecordDto(
         Long id,
         String sourcePath,
@@ -27,8 +33,20 @@ public record MediaImportRecordDto(
         boolean duplicate,
         boolean imported,
         boolean sourceDeleted,
-        OffsetDateTime createdAt
+        OffsetDateTime createdAt,
+        boolean deleteSourceRequested,
+        String cleanupStatus,
+        String cleanupError
 ) {
+    /**
+     * 将 {@link MediaImportRecord} 实体转换为 DTO，同时完成显示状态的映射。
+     *
+     * Converts a {@link MediaImportRecord} entity to a DTO, performing display
+     * status mapping at the same time.
+     *
+     * @param record 媒体导入记录实体 / the media import record entity
+     * @return 填充了转换后显示状态的 DTO 实例 / DTO instance with mapped display status
+     */
     public static MediaImportRecordDto from(MediaImportRecord record) {
         return new MediaImportRecordDto(
                 record.getId(),
@@ -53,7 +71,10 @@ public record MediaImportRecordDto(
                 record.isDuplicateFlag(),
                 record.isImportedFlag(),
                 record.isSourceDeleted(),
-                record.getCreatedAt()
+                record.getCreatedAt(),
+                record.isDeleteSourceRequested(),
+                record.getCleanupStatus(),
+                record.getCleanupError()
         );
     }
 

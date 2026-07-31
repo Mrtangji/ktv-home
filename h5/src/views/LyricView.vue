@@ -1,6 +1,6 @@
 <template>
   <div class="page">
-    <!-- 顶部迷你曲目条 -->
+    <!-- 顶部迷你曲目条 / Mini track bar at top -->
     <div class="topbar">
       <span class="down" @click="$router.back()">⌄</span>
       <div class="grow center">
@@ -11,7 +11,7 @@
       <div class="cover"></div>
     </div>
 
-    <!-- 歌词滚动区 -->
+    <!-- 歌词滚动区 / Lyric scroll area -->
     <div class="lyric grow">
       <div v-if="!lines.length" class="nolyric">
         {{ song ? '这首歌暂无歌词' : '还没有歌曲播放' }}
@@ -26,7 +26,7 @@
       </div>
     </div>
 
-    <!-- 底部迷你控制 -->
+    <!-- 底部迷你控制 / Mini controls at bottom -->
     <div class="mini">
       <button class="c" @click="restart">🔁</button>
       <button class="c big" @click="togglePlay">{{ player.isPlaying ? '⏸' : '▶' }}</button>
@@ -36,6 +36,12 @@
 </template>
 
 <script setup>
+/**
+ * 歌词视图 — 展示当前播放歌曲的滚动歌词，支持逐字高亮和迷你播放控制。
+ *
+ * Lyric view — displays scrolling lyrics for the currently playing song,
+ * with word-by-word highlighting and mini playback controls.
+ */
 import { ref, computed, watch, onMounted } from 'vue'
 import { usePlayerStore } from '../stores/player'
 import { useUserStore } from '../stores/user'
@@ -47,16 +53,28 @@ const player = usePlayerStore()
 const user = useUserStore()
 const controls = makeControls(user.clientToken)
 
+/** 当前播放歌曲的计算属性 / Computed: currently playing song */
 const song = computed(() => player.nowPlaying?.song)
+/** 解析后的歌词行数组，每项含 time(ms) 和 text / Parsed lyric lines, each with time(ms) and text */
 const lines = ref([])       // [{time, text}]
+/** 每行歌词高度(px)，用于滚动偏移计算 / Line height (px) for scroll offset calculation */
 const LINE_H = 44
 
+/**
+ * 播放进度百分比 (0–100)。
+ *
+ * Playback progress percentage (0–100).
+ */
 const progressPct = computed(() => {
   const dur = song.value?.durationMs || 0
   return dur ? Math.min(100, Math.round((player.positionMs / dur) * 100)) : 0
 })
 
-// 当前高亮行：最后一个 time <= position
+/**
+ * 当前高亮行索引：最后一个 time <= 当前播放位置的歌词行。
+ *
+ * Current highlighted line index: the last line whose time <= current playback position.
+ */
 const curLine = computed(() => {
   const pos = player.positionMs
   let idx = 0
@@ -66,9 +84,20 @@ const curLine = computed(() => {
   return idx
 })
 
-// 让当前行居中：容器约 5 行可视，居中偏移
+/**
+ * 滚动偏移量(px)，使当前歌词行保持在可视区域居中位置。
+ *
+ * Scroll offset (px) to keep the current lyric line centered in the viewport.
+ */
 const offset = computed(() => -(curLine.value * LINE_H))
 
+/**
+ * 根据歌曲 ID 加载并解析歌词文件。
+ *
+ * Fetches and parses the lyric file for the given song ID.
+ *
+ * @param {string|number} id - 歌曲唯一标识 / Song ID
+ */
 async function loadLyric(id) {
   lines.value = []
   if (!id || !song.value || song.value.lyricType === 'none') return
@@ -79,11 +108,28 @@ async function loadLyric(id) {
   } catch { /* ignore */ }
 }
 
+/** 监听播放队列变化，自动加载对应歌词 / Watch queue changes to auto-load lyrics */
 watch(() => player.nowPlaying?.queueId, () => loadLyric(song.value?.id))
+/** 组件挂载时加载当前歌词 / Load lyrics for current song on mount */
 onMounted(() => loadLyric(song.value?.id))
 
+/**
+ * 切换播放/暂停状态。
+ *
+ * Toggles between play and pause.
+ */
 async function togglePlay() { player.isPlaying ? await controls.pause() : await controls.play() }
+/**
+ * 重新播放当前歌曲。
+ *
+ * Restarts the current song from the beginning.
+ */
 async function restart() { await controls.restart() }
+/**
+ * 切到下一首歌曲，操作前弹出确认对话框。
+ *
+ * Skips to the next song after a confirmation dialog.
+ */
 async function next() {
   if (await confirmDialog(`将切掉《${song.value?.title || ''}》。`, { title: '确认切歌', tone: 'warning' })) await controls.next()
 }

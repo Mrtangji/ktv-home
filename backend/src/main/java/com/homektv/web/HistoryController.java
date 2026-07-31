@@ -28,6 +28,9 @@ import java.util.Map;
 
 /**
  * 已播历史（P3.2，详设§7 H5-05）：今晚已唱列表，供「再唱一遍」（前端用 song id 再点歌）。
+ *
+ * Playback history (P3.2, detail design §7 H5-05): tonight's already-sung list,
+ * used for "sing again" (the frontend re-orders by song id).
  */
 @RestController
 @RequestMapping("/api")
@@ -42,6 +45,11 @@ public class HistoryController {
     private final UserService userService;
     private final WsBroadcaster broadcaster;
 
+    /**
+     * 构造函数，注入所有依赖服务与仓库。
+     *
+     * Constructor, injects all dependent services and repositories.
+     */
     public HistoryController(PlayHistoryRepository historyRepo, SongRepository songRepo,
                              AppUserRepository userRepo, QueueService queueService,
                              PlaybackService playbackService, SnapshotService snapshotService,
@@ -56,6 +64,12 @@ public class HistoryController {
         this.broadcaster = broadcaster;
     }
 
+    /**
+     * 查询最近 50 条已播歌曲记录。
+     *
+     * Returns the most recent 50 playback history entries as song DTOs.
+     * @return 最近已播歌曲列表 / the recent playback song list
+     */
     @GetMapping("/history")
     public List<SongDto> history() {
         List<SongDto> out = new ArrayList<>();
@@ -65,6 +79,15 @@ public class HistoryController {
         return out;
     }
 
+    /**
+     * 查询最近播放记录（含演唱者昵称和是否为当前用户所点），支持仅看我的。
+     *
+     * Returns recent playback history with singer nickname and ownership info,
+     * optionally filtered to the current user's own entries.
+     * @param clientToken 客户端令牌，用于识别当前用户 / client token to identify the current user
+     * @param mine        是否只返回当前用户点播的记录 / whether to return only the current user's entries
+     * @return 最近播放记录列表 / the recent playback history list
+     */
     @GetMapping("/history/recent")
     public List<RecentHistoryDto> recent(@RequestParam(required = false) String clientToken,
                                          @RequestParam(defaultValue = "false") boolean mine) {
@@ -83,6 +106,15 @@ public class HistoryController {
         return result;
     }
 
+    /**
+     * 「再唱一遍」：根据历史记录重新点歌，加入播放队列并广播状态更新。
+     *
+     * "Sing again": re-orders the song from history, enqueues it,
+     * and broadcasts queue / playback status updates.
+     * @param historyId 历史记录 ID / the history record ID
+     * @param request   包含 clientToken 和是否强插的请求体 / request body with client token and force flag
+     * @return 包含 queueId、排队位置和队列快照的 map / map with queueId, position, and snapshot
+     */
     @PostMapping("/history/{historyId}/repeat")
     public Map<String, Object> repeat(@PathVariable Long historyId, @RequestBody RepeatRequest request) {
         PlayHistory history = historyRepo.findById(historyId)

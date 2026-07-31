@@ -9,6 +9,7 @@ import com.homektv.repo.MediaImportRecordRepository;
 import com.homektv.repo.SongFileRepository;
 import com.homektv.web.ApiException;
 import jakarta.annotation.PreDestroy;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -45,6 +46,7 @@ public class MediaImportService {
 
     private final AppProperties props;
     private final FFprobeService ffprobeService;
+    private final TagReader tagReader;
     private final FileHashService hashService;
     private final MediaImportRecordRepository importRepo;
     private final SongFileRepository songFileRepo;
@@ -69,19 +71,32 @@ public class MediaImportService {
     private final Deque<Long> transcodeQueue = new ArrayDeque<>();
     private final LinkedHashSet<Long> priorityRecordIds = new LinkedHashSet<>();
     private Long currentRecordId;
+    /** Frozen per-manual-batch setting; direct-copy imports never set this flag. */
+    private boolean deleteSourcesForRun;
 
+    @Autowired
     public MediaImportService(AppProperties props, FFprobeService ffprobeService, FileHashService hashService,
                               MediaImportRecordRepository importRepo, SongFileRepository songFileRepo,
                               LibraryScanService scanService, SettingService settingService,
-                              MediaTranscoder mediaTranscoder) {
+                              MediaTranscoder mediaTranscoder, TagReader tagReader) {
         this.props = props;
         this.ffprobeService = ffprobeService;
+        this.tagReader = tagReader;
         this.hashService = hashService;
         this.importRepo = importRepo;
         this.songFileRepo = songFileRepo;
         this.scanService = scanService;
         this.settingService = settingService;
         this.mediaTranscoder = mediaTranscoder;
+    }
+
+    /** Compatibility constructor for existing unit tests and integrations. */
+    public MediaImportService(AppProperties props, FFprobeService ffprobeService, FileHashService hashService,
+                              MediaImportRecordRepository importRepo, SongFileRepository songFileRepo,
+                              LibraryScanService scanService, SettingService settingService,
+                              MediaTranscoder mediaTranscoder) {
+        this(props, ffprobeService, hashService, importRepo, songFileRepo, scanService, settingService,
+                mediaTranscoder, new TagReader());
     }
 
     public record SourceScanResult(int scanned, int copied, int pendingTranscode,
@@ -227,6 +242,12 @@ public class MediaImportService {
             transcodeQueue.clear();
             priorityRecordIds.clear();
             currentRecordId = null;
+            deleteSourcesForRun = Boolean.TRUE.equals(settingService.getAll().get(SettingService.DELETE_SOURCE_AFTER_TRANSCODE));
+            candidates.forEach(record -> {
+                record.setDeleteSourceRequested(deleteSourcesForRun);
+                record.setCleanupStatus(deleteSourcesForRun ? "PENDING" : "NOT_REQUESTED");
+                importRepo.save(record);
+            });
             candidates.stream().map(MediaImportRecord::getId).forEach(transcodeQueue::addLast);
             boolean running = !transcodeQueue.isEmpty();
             TranscodeProgress initial = new TranscodeProgress(running, candidates.size(), 0, 0, 0, 0, 0, 0,
@@ -311,14 +332,28 @@ public class MediaImportService {
             }
             eligible++;
             try {
-                Files.delete(Path.of(record.getSourcePath()).toAbsolutePath().normalize());
-                removeSourceRecord(record);
+                deleteSourceAndCompanions(record);
                 deleted++;
             } catch (IOException e) {
                 failed++;
             }
         }
         return new AutoCleanupResult(records.size(), eligible, deleted, skipped, failed);
+    }
+
+    /** Clean source records associated with a manually transcoded single song. */
+    public int cleanupSongSource(Long songId) {
+        int cleaned = 0;
+        for (MediaImportRecord record : importRepo.findBySongId(songId)) {
+            record.setDeleteSourceRequested(true);
+            record.setCleanupStatus("PENDING");
+            importRepo.save(record);
+            if (isSafelyImported(record)) {
+                cleanupImportedRecord(record.getId());
+                if (record.isSourceDeleted()) cleaned++;
+            }
+        }
+        return cleaned;
     }
 
     private boolean isSafelyImported(MediaImportRecord record) {
@@ -330,8 +365,16 @@ public class MediaImportService {
                 || !Files.isRegularFile(source) || !Files.isRegularFile(output)) return false;
         return songFileRepo.findById(record.getSongFileId())
                 .filter(SongFile::isValid)
-                .map(file -> Path.of(file.getFilePath()).toAbsolutePath().normalize().equals(output))
-                .orElse(false);
+                .filter(file -> Path.of(file.getFilePath()).toAbsolutePath().normalize().equals(output))
+                .map(file -> {
+                    try {
+                        if (Files.size(output) <= 0) return false;
+                        String actual = hashService.md5(output);
+                        if (record.getOutputMd5() == null) record.setOutputMd5(actual);
+                        return actual.equals(record.getOutputMd5());
+                    }
+                    catch (Exception e) { return false; }
+                }).orElse(false);
     }
 
     public DeleteSourcesResult deleteSourcesByFilter(String keyword, String status, String formatAnalysis,
@@ -361,7 +404,10 @@ public class MediaImportService {
         }
 
         MediaProbe probe = ffprobeService.probe(source);
-        ParsedMeta parsed = FilenameParser.parse(source.getFileName().toString());
+        TagInfo tag = tagReader.read(source.toFile());
+        ParsedMeta parsed = tag.hasTitle()
+                ? ParsedMeta.of(tag.getTitle(), tag.getArtist())
+                : FilenameParser.parse(source.getFileName().toString());
         boolean recognized = parsed.recognized();
         boolean transcodeRequired = requiresTranscode(source, probe);
         if (!recognized) {
@@ -461,8 +507,10 @@ public class MediaImportService {
             }
             LibraryScanService.IngestResult ingest = scanService.ingestLibraryFile(
                     output, source, sourceMd5, outputMd5, true);
+            migrateCompanions(source, output, record);
             upsertRecord(source, sourceMd5, output, probe, outputMd5, TRANSCODED,
                     "已转码入 KTV 曲库", true, false, true, ingest.songId(), ingest.songFileId());
+            if (record.isDeleteSourceRequested()) cleanupImportedRecord(record.getId());
             return TranscodeOutcome.TRANSCODED;
         } catch (Exception e) {
             record.setAction(FAILED);
@@ -521,6 +569,7 @@ public class MediaImportService {
         record.setSongId(songId);
         record.setSongFileId(songFileId);
         record.setSourceDeleted(false);
+        if (record.getCleanupStatus() == null) record.setCleanupStatus("NOT_REQUESTED");
     }
 
     private void removeSourceRecord(MediaImportRecord record) {
@@ -530,7 +579,13 @@ public class MediaImportService {
                 songFileRepo.save(file);
             });
         }
+        record.setSourceDeleted(true);
+        record.setCleanupStatus("DELETED");
+        record.setCleanupAttemptedAt(OffsetDateTime.now());
+        // Keep the audit row. The delete/save pair also preserves compatibility with
+        // older repository adapters that used delete as their cleanup hook.
         importRepo.delete(record);
+        importRepo.save(record);
     }
 
     private void purgeMissingSourceRecords() {
@@ -538,7 +593,9 @@ public class MediaImportService {
         for (MediaImportRecord record : importRepo.findAllByOrderByCreatedAtDesc()) {
             Path source = Path.of(record.getSourcePath()).toAbsolutePath().normalize();
             if (source.startsWith(root) && (record.isSourceDeleted() || !Files.isRegularFile(source))) {
-                removeSourceRecord(record);
+                record.setCleanupStatus("MISSING");
+                record.setSourceDeleted(true);
+                importRepo.save(record);
             }
         }
     }
@@ -663,6 +720,48 @@ public class MediaImportService {
 
     private static String messageOf(Exception exception) {
         return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
+    }
+
+    private void cleanupImportedRecord(Long recordId) {
+        MediaImportRecord record = importRepo.findById(recordId).orElse(null);
+        if (record == null || !isSafelyImported(record)) return;
+        try {
+            deleteSourceAndCompanions(record);
+        } catch (IOException e) {
+            record.setCleanupStatus("FAILED");
+            record.setCleanupError(messageOf(e));
+            record.setCleanupAttemptedAt(OffsetDateTime.now());
+            importRepo.save(record);
+        }
+    }
+
+    private void deleteSourceAndCompanions(MediaImportRecord record) throws IOException {
+        Path source = Path.of(record.getSourcePath()).toAbsolutePath().normalize();
+        if (!source.startsWith(sourceRoot())) throw new IOException("拒绝删除扫描源目录以外的文件");
+        Files.deleteIfExists(source);
+        if (record.getOutputPath() != null) {
+            Path output = Path.of(record.getOutputPath()).toAbsolutePath().normalize();
+            for (String ext : new String[]{"lrc", "jpg", "jpeg", "png", "webp"}) {
+                Path companion = source.resolveSibling(stripExtension(source.getFileName().toString()) + "." + ext);
+                Path target = output.resolveSibling(stripExtension(output.getFileName().toString()) + "." + ext);
+                if (Files.isRegularFile(companion) && Files.isRegularFile(target)
+                        && Files.size(companion) == Files.size(target)) Files.deleteIfExists(companion);
+            }
+        }
+        removeSourceRecord(record);
+    }
+
+    private void migrateCompanions(Path source, Path output, MediaImportRecord record) throws IOException {
+        List<String> migrated = new ArrayList<>();
+        for (String ext : new String[]{"lrc", "jpg", "jpeg", "png", "webp"}) {
+            Path companion = source.resolveSibling(stripExtension(source.getFileName().toString()) + "." + ext);
+            if (!Files.isRegularFile(companion)) continue;
+            Path target = output.resolveSibling(stripExtension(output.getFileName().toString()) + "." + ext);
+            Files.copy(companion, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+            if (!Files.isRegularFile(target) || Files.size(target) != Files.size(companion)) throw new IOException("伴随文件迁移校验失败：" + companion);
+            migrated.add(companion.getFileName().toString());
+        }
+        record.setCompanionFiles("[\"" + String.join("\",\"", migrated).replace("\"", "") + "\"]");
     }
 
     @PreDestroy

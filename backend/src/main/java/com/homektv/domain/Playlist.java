@@ -6,6 +6,11 @@ import org.hibernate.generator.EventType;
 
 import java.time.OffsetDateTime;
 
+/**
+ * 歌单实体，对应 playlists 表。
+ *
+ * Playlist entity, mapped to the playlists table.
+ */
 @Entity
 @Table(name = "playlists")
 public class Playlist {
@@ -31,6 +36,8 @@ public class Playlist {
     @Generated(event = {EventType.INSERT, EventType.UPDATE})
     @Column(name = "updated_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime updatedAt;
+
+    // ---- getters / setters ----
 
     public Long getId() { return id; }
     public String getName() { return name; }

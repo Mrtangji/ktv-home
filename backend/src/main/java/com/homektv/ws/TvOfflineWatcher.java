@@ -15,13 +15,20 @@ import java.util.concurrent.TimeUnit;
 /**
  * TV 离线看门狗：TV 端 WebSocket 断开后若 10s 内未重连，清空播放队列，
  * 避免下次打开 TV 时快照带着未播完的歌而自动续播；10s 内重连则取消清理。
+ *
+ * TV offline watchdog: when the TV WebSocket disconnects, if no reconnection
+ * occurs within 10 seconds the playback queue is cleared, preventing the next
+ * TV launch from auto-resuming via a stale snapshot; reconnection within 10s
+ * cancels the scheduled clear.
  */
 @Component
 public class TvOfflineWatcher {
 
     private static final Logger log = LoggerFactory.getLogger(TvOfflineWatcher.class);
 
-    /** TV 离线判定窗口：超过该时长未重连即清空队列 */
+    /** TV 离线判定窗口：超过该时长未重连即清空队列。
+     *  TV offline threshold: queue is cleared if the TV stays disconnected
+     *  longer than this duration. */
     private static final long OFFLINE_CLEAR_DELAY_MS = 10_000L;
 
     private final WsBroadcaster broadcaster;
@@ -42,7 +49,8 @@ public class TvOfflineWatcher {
         this.snapshotService = snapshotService;
     }
 
-    /** TV 会话建立：取消待执行的离线清理。 */
+    /** TV 会话建立：取消待执行的离线清理。
+     *  TV session established: cancel any pending offline clear. */
     public synchronized void onTvConnected() {
         if (pending != null) {
             pending.cancel(false);
@@ -51,7 +59,9 @@ public class TvOfflineWatcher {
         }
     }
 
-    /** TV 会话断开：无其他 TV 在线时，10s 后清空队列。 */
+    /** TV 会话断开：无其他 TV 在线时，10s 后清空队列。
+     *  TV session disconnected: if no other TV session is online,
+     *  schedule queue clear after 10 seconds. */
     public synchronized void onTvDisconnected() {
         if (broadcaster.isTvOnline()) {
             return; // 还有其他 TV 会话在线

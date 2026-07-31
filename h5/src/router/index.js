@@ -1,7 +1,16 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '../stores/user'
 
+/**
+ * 应用路由配置模块。
+ * 定义 H5 前端所有页面的路由映射、懒加载及导航守卫。
+ *
+ * App router configuration module.
+ * Defines route mappings, lazy loading, and navigation guards for all H5 frontend pages.
+ */
+
 // H5 页面地图（详设§3.2）
+// H5 page map (design spec §3.2)
 const routes = [
   { path: '/', name: 'entry', component: () => import('../views/EntryView.vue'), meta: { public: true } },        // H5-01
   { path: '/home', name: 'home', component: () => import('../views/HomeView.vue') },                              // H5-02
@@ -17,6 +26,7 @@ const routes = [
   { path: '/lyric', name: 'lyric', component: () => import('../views/LyricView.vue') },                           // H5-07
 
   // 管理后台（免登录，PC/手机浏览器）
+  // Admin panel (no login required, accessible from PC/mobile browser)
   { path: '/admin', name: 'admin-dashboard', component: () => import('../views/admin/DashboardView.vue'), meta: { public: true, admin: true } },
   { path: '/admin/source-library', name: 'admin-source-library', component: () => import('../views/admin/SourceLibraryView.vue'), meta: { public: true, admin: true } },
   { path: '/admin/ktv-library', name: 'admin-ktv-library', component: () => import('../views/admin/KtvLibraryView.vue'), meta: { public: true, admin: true } },
@@ -25,13 +35,29 @@ const routes = [
   { path: '/admin/settings', name: 'admin-settings', component: () => import('../views/admin/SettingsView.vue'), meta: { public: true, admin: true } }
 ]
 
+/**
+ * 创建路由实例。
+ * 使用 HTML5 History 模式，基础路径为 /m/。
+ *
+ * Create router instance.
+ * Uses HTML5 History mode with base path /m/.
+ */
 const router = createRouter({
   // 部署在 /m 下
+  // Deployed under /m/
   history: createWebHistory('/m/'),
   routes
 })
 
-// 未注册（无昵称）时强制回进入页（详设 H5-01）
+/**
+ * 全局前置导航守卫。
+ * 未注册（无昵称）用户强制跳转至进入页。
+ * 详设 H5-01。
+ *
+ * Global beforeEach navigation guard.
+ * Unregistered users (no nickname) are redirected to the entry page.
+ * Design spec H5-01.
+ */
 router.beforeEach((to) => {
   const user = useUserStore()
   if (!to.meta.public && !user.isRegistered) {

@@ -1,11 +1,20 @@
 <template>
+  <!-- Toast 消息容器 / Toast message container -->
   <transition name="toast">
     <div v-if="message" class="proto-toast">{{ message }}</div>
   </transition>
 </template>
 
 <script setup>
+/**
+ * Toast 全局宿主组件。挂载在应用根节点，通过 useToast composable 接收并展示全局提示消息。
+ *
+ * Global toast host component. Mounted at the app root, it receives and displays
+ * global toast messages via the useToast composable.
+ */
 import { useToast } from '../composables/useToast'
+
+// 从 composable 中解构出消息响应式引用 / Destructure reactive message ref from composable
 const { message } = useToast()
 </script>
 

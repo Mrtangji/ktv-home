@@ -9,6 +9,12 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * 媒体导入记录 Repository，对应 media_import_records 表，提供媒体文件导入记录的持久化操作。
+ *
+ * Media import record repository, maps to the media_import_records table, providing
+ * persistence operations for media file import records.
+ */
 public interface MediaImportRecordRepository extends JpaRepository<MediaImportRecord, Long> {
     Optional<MediaImportRecord> findBySourcePath(String sourcePath);
     boolean existsBySourceMd5(String sourceMd5);

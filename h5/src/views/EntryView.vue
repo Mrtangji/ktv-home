@@ -1,9 +1,11 @@
 <template>
   <div class="entry">
+    <!-- 品牌区：Logo + 标题 / Branding: logo + title -->
     <div class="logo">🎤</div>
     <div class="title">家庭KTV</div>
     <div class="room">房间：客厅</div>
 
+    <!-- 昵称输入区 / Nickname input -->
     <div class="field">
       <label>你的昵称（点歌时显示）</label>
       <div class="input-wrap">
@@ -13,11 +15,19 @@
     </div>
 
     <button class="btn enter-btn" @click="enter">进入点歌</button>
+    <!-- 页脚提示 / Footer note -->
     <div class="foot">仅限家庭局域网使用 · 无需注册</div>
   </div>
 </template>
 
 <script setup>
+/**
+ * 入口页面 — 用户输入昵称后进入点歌系统。
+ * 支持随机昵称生成、本地记忆和昵称冲突自动去重。
+ *
+ * Entry page — user enters a nickname and proceeds to the song-request system.
+ * Supports random nickname generation, local memory, and automatic dedup on nickname conflict.
+ */
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
@@ -29,15 +39,26 @@ const user = useUserStore()
 const player = usePlayerStore()
 
 // 默认回填已存昵称或随机建议值（详设 H5-01）
+	// Default: fallback to saved nickname or a random suggestion (spec H5-01)
 const nickname = ref(user.suggestNickname())
 
+/**
+ * 点击"进入点歌"按钮：注册昵称并跳转到首页。
+ * 先将昵称注册到本地 store，再同步到服务端以处理昵称冲突（P2.13）。
+ * 注册完成后建立 WebSocket 连接并路由到 home。
+ *
+ * Handles the "Enter" button: registers the nickname and navigates to home.
+ * Registers locally first, then syncs to server to resolve nickname conflicts (P2.13).
+ * After registration, establishes the WebSocket connection and routes to home.
+ */
 async function enter() {
   user.register(nickname.value)
   // 同步到服务端并取回去重后的最终昵称（P2.13 昵称冲突显序号）
+  // Sync to server and fetch the deduped final nickname (P2.13 nickname conflict → suffix)
   try {
     const res = await api.registerUser(user.clientToken, user.nickname)
     if (res?.nickname) user.setNickname(res.nickname)
-  } catch { /* 离线也可继续，稍后重连同步 */ }
+  } catch { /* 离线也可继续，稍后重连同步 / offline is ok, re-sync on reconnect */ }
   player.connect()
   router.replace({ name: 'home' })
 }

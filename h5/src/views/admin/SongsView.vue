@@ -1,6 +1,6 @@
 <template>
   <AdminLayout active="songs">
-    <!-- 工具条 -->
+    <!-- 工具条：筛选 + 批量操作 / Toolbar: filter + batch actions -->
     <div class="toolbar">
       <span v-for="f in filters" :key="f.value" class="chip" :class="{ on: type === f.value }"
             @click="setType(f.value)">{{ f.label }}</span>
@@ -9,6 +9,7 @@
       <button class="btn" @click="scan" :disabled="scanning">⟳ 扫描</button>
     </div>
 
+    <!-- 导入记录面板 / Import records panel -->
     <div class="imports card">
       <div class="imports-head">
         <strong>导入记录</strong>
@@ -51,7 +52,7 @@
       </table>
     </div>
 
-    <!-- 表格 -->
+    <!-- 歌曲列表表格 / Song list table -->
     <table class="tbl">
       <thead>
         <tr><th><input type="checkbox" :checked="allSelected" @change="toggleAll" /></th><th>歌名</th><th>歌手</th><th>类型</th><th>时长</th><th>点唱</th><th>操作</th></tr>
@@ -74,14 +75,14 @@
       </tbody>
     </table>
 
-    <!-- 分页 -->
+    <!-- 分页控件 / Pagination -->
     <div class="pager" v-if="totalPages > 1">
       <span class="link" :class="{ disabled: page === 0 }" @click="go(page - 1)">‹ 上一页</span>
       <span class="cur">{{ page + 1 }} / {{ totalPages }}</span>
       <span class="link" :class="{ disabled: page >= totalPages - 1 }" @click="go(page + 1)">下一页 ›</span>
     </div>
 
-    <!-- 编辑弹层 -->
+    <!-- 编辑曲目弹层 / Edit song modal -->
     <div v-if="editing" class="mask" @click.self="editing = null">
       <div class="modal">
         <div class="mt">编辑曲目</div>
@@ -96,6 +97,7 @@
       </div>
     </div>
 
+    <!-- 批量重解析文件名弹层 / Batch re-parse filenames modal -->
     <div v-if="reparseOpen" class="mask" @click.self="reparseOpen = false">
       <div class="modal reparse-modal">
         <div class="mt">批量重解析文件名</div>
@@ -113,16 +115,24 @@
 </template>
 
 <script setup>
+/**
+ * 歌曲管理页面 —— 浏览、筛选、编辑、转码、删除曲目，以及导入记录查看和批量重解析文件名。
+ *
+ * Song management page — browse, filter, edit, transcode, delete tracks,
+ * view import records, and batch re-parse filenames.
+ */
 import { ref, onMounted, reactive, computed } from 'vue'
 import api from '../../api/client'
 import AdminLayout from './AdminLayout.vue'
 import { alertDialog, confirmDialog } from '../../composables/useDialog'
 
+/** 歌曲类型筛选选项 / Song type filter options */
 const filters = [
   { value: '', label: '全部' }, { value: 'KTV_VIDEO', label: 'KTV版' },
   { value: 'MV', label: 'MV版' }, { value: 'AUDIO', label: '音频版' },
   { value: 'unrecognized', label: '未识别' }
 ]
+/** 导入记录筛选选项 / Import record filter options */
 const importFilters = [
   { value: '', label: '全部记录' },
   { value: 'COPIED', label: '已复制' },
@@ -132,6 +142,7 @@ const importFilters = [
   { value: 'FAILED', label: '失败' }
 ]
 
+// —— 响应式状态 / Reactive state ——
 const songs = ref([])
 const imports = ref([])
 const type = ref('')
@@ -148,15 +159,27 @@ const reparseRule = ref('artist_title')
 const reparsePreview = ref([])
 const previewing = ref(false)
 const applying = ref(false)
+/** 是否全选当前页 / Whether all songs on current page are selected */
 const allSelected = computed(() => songs.value.length > 0 && songs.value.every(song => selected.value.has(song.id)))
+/** 批量重解析中可识别的曲目数 / Number of recognizable tracks in batch re-parse preview */
 const recognizedCount = computed(() => reparsePreview.value.filter(item => item.recognized).length)
 
+/**
+ * 加载当前筛选条件下的歌曲分页列表。
+ *
+ * Load paginated song list under current filter.
+ */
 async function load() {
   const r = await api.adminSongs(type.value, page.value, 20).catch(() => ({ content: [], totalPages: 1 }))
   songs.value = r.content || []
   selected.value = new Set([...selected.value].filter(id => songs.value.some(song => song.id === id)))
   totalPages.value = r.totalPages || 1
 }
+/**
+ * 加载导入记录列表。
+ *
+ * Load import record list.
+ */
 async function loadImports() {
   const r = await api.adminImports(importAction.value, 0, 20).catch(() => ({ content: [] }))
   imports.value = r.content || []
@@ -169,15 +192,29 @@ function go(p) { if (p >= 0 && p < totalPages.value) { page.value = p; load() } 
 function toggle(id) { const next = new Set(selected.value); next.has(id) ? next.delete(id) : next.add(id); selected.value = next }
 function toggleAll() { selected.value = allSelected.value ? new Set() : new Set(songs.value.map(song => song.id)) }
 
+/**
+ * 触发服务端扫描曲库目录，完成后刷新歌曲列表和导入记录。
+ *
+ * Trigger server-side media library scan, then refresh song list and import records.
+ */
 async function scan() {
   scanning.value = true
   try { await api.adminScan(); await Promise.all([load(), loadImports()]) } finally { scanning.value = false }
 }
 
+/**
+ * 打开编辑弹层，将选中歌曲的信息填入表单。
+ * @param {Object} s - 歌曲对象 / Song object
+ */
 function edit(s) {
   editing.value = s
   form.title = s.title; form.artist = s.artist; form.language = ''; form.lyricText = ''
 }
+/**
+ * 提交编辑表单，保存歌曲信息到服务端。
+ *
+ * Submit edit form and persist song info to server.
+ */
 async function save() {
   try {
     await api.adminEditSong(editing.value.id, {
@@ -188,10 +225,18 @@ async function save() {
     await load()
   } catch (e) { await alertDialog(e.message || '保存失败') }
 }
+/**
+ * 删除指定歌曲记录（确认后）。
+ * @param {Object} s - 歌曲对象 / Song object
+ */
 async function del(s) {
   if (!await confirmDialog(`将删除《${s.title}》的记录。`, { title: '删除歌曲记录', tone: 'warning' })) return
   try { await api.adminDeleteSong(s.id); await load() } catch (e) { await alertDialog(e.message || '删除失败') }
 }
+/**
+ * 触发歌曲转码，生成 Android TV 兼容副本。
+ * @param {Object} s - 歌曲对象 / Song object
+ */
 async function transcode(s) {
   if (transcoding.value.has(s.id)) return
   if (!await confirmDialog(`将为《${s.title}》生成 Android TV 兼容副本，原文件会保留。`, { title: '转码歌曲' })) return
@@ -207,6 +252,10 @@ async function transcode(s) {
     const next = new Set(transcoding.value); next.delete(s.id); transcoding.value = next
   }
 }
+/**
+ * 删除导入记录对应的源视频文件。
+ * @param {Object} item - 导入记录对象 / Import record object
+ */
 async function deleteSource(item) {
   if (item.sourceDeleted) return
   if (!await confirmDialog(item.sourceFilename, { title: '删除源视频', tone: 'warning' })) return
@@ -215,13 +264,28 @@ async function deleteSource(item) {
     await loadImports()
   } catch (e) { await alertDialog(e.message || '删除源视频失败') }
 }
+/**
+ * 打开批量重解析弹层并自动加载预览。
+ *
+ * Open batch re-parse modal and auto-load preview.
+ */
 async function openReparse() { reparseOpen.value = true; await previewReparse() }
+/**
+ * 根据选中歌曲和解析规则生成文件名重解析预览。
+ *
+ * Generate filename re-parse preview based on selected songs and parse rule.
+ */
 async function previewReparse() {
   previewing.value = true
   try { reparsePreview.value = await api.adminPreviewReparse([...selected.value], reparseRule.value) }
   catch (error) { await alertDialog(error.message || '预览失败') }
   finally { previewing.value = false }
 }
+/**
+ * 确认并执行批量重解析，将识别结果写入歌曲记录。
+ *
+ * Confirm and apply batch re-parse, writing recognized results to song records.
+ */
 async function applyReparse() {
   if (!await confirmDialog(`将按当前规则更新 ${recognizedCount.value} 首歌曲。`, { title: '确认批量重解析' })) return
   applying.value = true
@@ -233,12 +297,20 @@ async function applyReparse() {
   finally { applying.value = false }
 }
 
+// —— 工具函数 / Utility functions ——
+/** 判断歌曲是否未被识别（歌手为"未知歌手"） / Check if song is unrecognized (artist = "未知歌手") */
 function isUnrec(s) { return s.artist === '未知歌手' }
+/** 歌曲媒体类型中文标签映射 / Chinese label mapping for song media type */
 function tagText(t) { return { KTV_VIDEO: 'KTV', MV: 'MV', AUDIO: '音频' }[t] || '' }
+/** 歌曲媒体类型 CSS 类名映射 / CSS class mapping for song media type */
 function tagClass(t) { return { KTV_VIDEO: 'tag-ktv', MV: 'tag-mv', AUDIO: 'tag-audio' }[t] || 'tag-audio' }
+/** 格式化毫秒时长为 m:ss 格式 / Format millisecond duration to m:ss */
 function fmtDur(ms) { if (!ms) return '—'; const s = Math.round(ms / 1000); return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}` }
+/** 导入操作中文标签映射 / Chinese label mapping for import action */
 function importTagText(action) { return { COPIED: '已复制', TRANSCODED: '已转码', SKIPPED_SOURCE_MD5_DUPLICATE: '源MD5重复', SKIPPED_OUTPUT_MD5_DUPLICATE: '输出MD5重复', FAILED: '失败' }[action] || action }
+/** 导入操作 CSS 类名映射 / CSS class mapping for import action */
 function importTagClass(action) { return { COPIED: 'tag-ktv', TRANSCODED: 'tag-mv', SKIPPED_SOURCE_MD5_DUPLICATE: 'tag-audio', SKIPPED_OUTPUT_MD5_DUPLICATE: 'tag-audio', FAILED: 'tag-failed' }[action] || 'tag-audio' }
+/** 截短 MD5 显示（首尾各8位） / Truncate MD5 for display (first & last 8 chars) */
 function shortMd5(v) { return v ? `${v.slice(0, 8)}...${v.slice(-8)}` : '—' }
 </script>
 

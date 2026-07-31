@@ -1,6 +1,23 @@
-// REST API 封装（详设§11）。基址 /api，开发时由 Vite 代理到 :8080。
+/**
+ * REST API 客户端封装模块。
+ * 基址为 /api，开发时由 Vite 代理到 :8080，详设§11。
+ *
+ * REST API client wrapper module.
+ * Base URL is /api, proxied to :8080 by Vite during development. See §11.
+ *
+ * @module api/client
+ */
 const BASE = '/api'
 
+/**
+ * 通用 HTTP 请求封装，自动处理 JSON/FormData、错误和 204 响应。
+ *
+ * General HTTP request wrapper. Auto-handles JSON/FormData, errors, and 204 responses.
+ *
+ * @param {string} path - 请求路径（相对 BASE）/ request path (relative to BASE)
+ * @param {object} [options] - fetch 配置项（如 method、body、headers）/ fetch options
+ * @returns {Promise<object|string|null>} 解析后的响应体 / parsed response body
+ */
 async function request(path, options = {}) {
   const isFormData = options.body instanceof FormData
   const res = await fetch(BASE + path, {
@@ -24,12 +41,14 @@ export const api = {
   health: () => request('/health'),
 
   // 搜索/曲库（P1.6/P1.7）
+  // Search / song library (P1.6/P1.7)
   searchSongs: (keyword, type = '', page = 0) =>
     request(`/songs?keyword=${encodeURIComponent(keyword)}&type=${type}&page=${page}`),
   songDetail: (id) => request(`/songs/${id}`),
   lyricText: (id) => request(`/lyric/${id}`),
 
   // 队列/控制（P1.9~P1.12）
+  // Queue / control (P1.9~P1.12)
   getQueue: () => request('/queue'),
   control: (action, params = {}, clientToken) =>
     request('/control', {
@@ -38,6 +57,7 @@ export const api = {
     }),
 
   // 发现/历史/心愿（P3）
+  // Discovery / history / wishes (P3)
   ranking: (days = 30) => request(`/ranking?days=${days}`),
   newSongs: () => request('/songs/new'),
   history: () => request('/history'),
@@ -63,6 +83,7 @@ export const api = {
   releaseRoomHost: (clientToken) => request('/room/host/release', { method: 'POST', body: JSON.stringify({ clientToken }) }),
 
   // 管理后台（P2）
+  // Admin dashboard (P2)
   adminStatus: () => request('/admin/status'),
   adminSongs: (params = {}) => request('/admin/songs?' + new URLSearchParams(
     Object.entries(params).filter(([, value]) => value !== '' && value != null)
@@ -101,6 +122,7 @@ export const api = {
   adminWishes: () => request('/wishes'),
 
   // ADM-04 AI 曲库与主题歌单
+  // ADM-04 AI song library and themed playlists
   adminAiTasks: () => request('/admin/ai/tasks'),
   adminAiCreateTask: (songId) => request('/admin/ai/tasks', { method: 'POST', body: JSON.stringify({ songId }) }),
   adminAiCreateUnclassified: (limit = 50) => request('/admin/ai/tasks/unclassified', { method: 'POST', body: JSON.stringify({ limit }) }),
@@ -112,6 +134,16 @@ export const api = {
   adminAiUpdatePlaylist: (id, body) => request(`/admin/ai/playlists/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   adminAiDeletePlaylist: (id) => request(`/admin/ai/playlists/${id}`, { method: 'DELETE' }),
   adminAiGeneratePlaylist: (body) => request('/admin/ai/playlists/generate', { method: 'POST', body: JSON.stringify(body) }),
+  adminAiPreviewPlaylist: (body) => request('/admin/ai/playlists/preview', { method: 'POST', body: JSON.stringify(body) }),
+  adminAiConfig: () => request('/admin/ai/config'),
+  adminAiPutConfig: (body) => request('/admin/ai/config', { method: 'PUT', body: JSON.stringify(body) }),
+  adminAiModels: () => request('/admin/ai/config/models'),
+  adminAiTestConfig: () => request('/admin/ai/config/test', { method: 'POST' }),
+  adminAiRepair: () => request('/admin/ai/repair', { method: 'POST' }),
+  adminAiRepairProgress: (batchId) => request(`/admin/ai/repair/${encodeURIComponent(batchId)}`),
+  adminAiPauseRepair: (batchId) => request(`/admin/ai/repair/${encodeURIComponent(batchId)}/pause`, { method: 'POST' }),
+  adminAiResumeRepair: (batchId) => request(`/admin/ai/repair/${encodeURIComponent(batchId)}/resume`, { method: 'POST' }),
+  adminAiRetryFailedRepair: (batchId) => request(`/admin/ai/repair/${encodeURIComponent(batchId)}/retry-failed`, { method: 'POST' }),
   adminAiAddPlaylistSong: (id, songId) => request(`/admin/ai/playlists/${id}/songs`, { method: 'POST', body: JSON.stringify({ songId }) }),
   adminAiRemovePlaylistSong: (id, songId) => request(`/admin/ai/playlists/${id}/songs/${songId}`, { method: 'DELETE' }),
   adminAiUploadPlaylistCover: (id, file) => {
@@ -122,7 +154,16 @@ export const api = {
   adminAiReorderPlaylistSongs: (id, songIds) => request(`/admin/ai/playlists/${id}/songs/order`, { method: 'PUT', body: JSON.stringify({ songIds }) })
 }
 
-// 控制指令便捷封装：自动带上当前用户 token（调用处传入）
+/**
+ * 控制指令便捷封装。
+ * 自动绑定当前用户 token，返回预配置的控制方法集合。
+ *
+ * Convenient control command wrapper.
+ * Auto-binds the current user token and returns a set of pre-configured control methods.
+ *
+ * @param {string} clientToken - 客户端用户标识 / client user identifier
+ * @returns {object} 控制方法集合 / collection of control methods
+ */
 export function makeControls(clientToken) {
   const c = (action, params) => api.control(action, params, clientToken)
   return {

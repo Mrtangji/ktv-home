@@ -1,8 +1,24 @@
-// LRC 歌词解析（详设 H5-07）。支持逐行 [mm:ss.xx] 与逐字增强 LRC。
+/**
+ * LRC 歌词解析模块（详设 H5-07）。
+ * 支持标准逐行时间标签 [mm:ss.xx] 与逐字增强 LRC 格式 <mm:ss.xx>。
+ *
+ * LRC lyrics parsing module (H5-07).
+ * Supports standard line-level timestamps [mm:ss.xx] and word-level enhanced LRC <mm:ss.xx>.
+ */
 
 const LINE_TAG = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?]/g
 const WORD_TAG = /<\d{1,2}:\d{2}(?:\.\d{1,3})?>/g
 
+/**
+ * 解析 LRC 歌词文本，返回按时间排序的歌词行数组。
+ * 每行包含 time（毫秒时间戳）、text（纯文本），逐字 LRC 额外包含 words（逐字时间数组）。
+ *
+ * Parse LRC lyrics text into a time-sorted array of lyric lines.
+ * Each line contains time (ms timestamp), text (plain text); word-level LRC also includes words (word-level timing array).
+ *
+ * @param {string} text - LRC 歌词原始文本 / Raw LRC lyrics text
+ * @returns {Array<{time: number, text: string, words?: Array<{time: number, text: string}>}>} 解析后的歌词行数组 / Parsed lyric lines array
+ */
 export function parseLrc(text) {
   if (!text) return []
   const out = []

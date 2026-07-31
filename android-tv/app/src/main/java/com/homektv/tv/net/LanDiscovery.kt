@@ -20,12 +20,23 @@ import java.net.NetworkInterface
 import java.net.SocketTimeoutException
 import java.util.Collections
 
+/**
+ * 局域网服务发现器，按 mDNS、UDP 和子网扫描顺序查找 Home KTV 服务。
+ *
+ * Discovers Home KTV servers on the LAN using mDNS, UDP, and subnet scanning.
+ */
 class LanDiscovery(context: Context) {
+    /** Discovery stages reported to the UI. / 向界面报告的发现阶段。 */
     enum class Stage { MDNS, UDP, SUBNET }
 
     private val appContext = context.applicationContext
     private val scanner = LanScanner()
 
+    /**
+     * 执行全部发现策略并合并去重结果。
+     *
+     * Runs all discovery strategies and returns deduplicated server results.
+     */
     suspend fun discoverAll(
         onStage: ((Stage) -> Unit)? = null,
         onProgress: ((Int, Int) -> Unit)? = null,

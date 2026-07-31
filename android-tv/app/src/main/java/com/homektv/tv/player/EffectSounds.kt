@@ -4,11 +4,13 @@ import kotlin.math.PI
 import kotlin.math.exp
 import kotlin.math.sin
 
+/** Generated PCM effect sound. / 生成的 PCM 音效数据。 */
 data class EffectSound(
     val sampleRate: Int,
     val samples: ShortArray,
 )
 
+/** Procedural sound-effect catalog. / 程序化生成的音效目录。 */
 object EffectSounds {
     const val SAMPLE_RATE = 22_050
 
@@ -23,6 +25,11 @@ object EffectSounds {
 
     val ids: Set<String> get() = sounds.keys
 
+    /**
+     * 按 ID 查找预生成音效，未知 ID 返回 null。
+     *
+     * Looks up a generated effect by ID and returns null for unknown IDs.
+     */
     fun find(effectId: String): EffectSound? = sounds[effectId.lowercase()]
 
     private fun noiseBursts(seed: Int, bursts: Int, durationMs: Int, brightness: Double): EffectSound {

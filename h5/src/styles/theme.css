@@ -3,17 +3,18 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
-  --bg: #08090d;
-  --panel: rgba(18,20,28,.85);
-  --panel2: rgba(28,32,44,.75);
-  --line: rgba(255,255,255,.06);
-  --gold: #f0c742; --gold2: #ffe17a; --gold-glow: rgba(240,199,66,.15);
+  --bg: #101319;
+  --panel: #181d25;
+  --panel2: #202630;
+  --line: rgba(255,255,255,.1);
+  --gold: #ffc64b; --gold2: #ffe39a; --gold-glow: rgba(255,198,75,.12);
+  --coral: #ff6b61; --coral-soft: #ff948d; --cyan: #54d6e2; --mint: #6ed6a8;
   --purple: #a78bfa; --purple-glow: rgba(167,139,250,.15);
   --red: #f87171; --green: #34d399;
-  --text: #f0f2f7; --dim: #a3b0c2; --dim2: #768398;
+  --text: #f7f8fb; --dim: #aeb7c5; --dim2: #747f90;
   --tagktv: #f0c742; --tagmv: #38bdf8; --tagaudio: #94a3b8;
   --glass: rgba(15,17,24,.7); --glass-border: rgba(255,255,255,.08);
-  --radius: 16px; --radius-sm: 10px; --radius-xs: 6px;
+  --radius: 8px; --radius-sm: 6px; --radius-xs: 4px;
   --shadow: 0 20px 60px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.3);
   --shadow-card: 0 8px 32px rgba(0,0,0,.4);
   --transition: all .2s cubic-bezier(.4,0,.2,1);
@@ -24,7 +25,7 @@ html, body { height: 100%; }
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: "SF Pro Display","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",system-ui,sans-serif;
+  font-family: -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;               /* 微信内禁下拉刷新防误触 */
 }

@@ -1,15 +1,21 @@
 <template>
   <div class="page">
     <header class="top"><button @click="$router.back()">‹</button><strong>分类浏览</strong><span></span></header>
+    <!-- 标签切换栏 / Tab switcher -->
     <div class="tabs"><button v-for="item in tabs" :key="item.key" :class="{ on: tab === item.key }" @click="tab = item.key">{{ item.label }}</button></div>
     <main>
+      <!-- 歌手模式 / Artists mode -->
       <template v-if="tab === 'artists'">
+        <!-- 首字母索引 / Initial letter index -->
         <div class="letters"><button v-for="letter in availableLetters" :key="letter" :class="{ on: activeLetter === letter }" @click="activeLetter = letter">{{ letter }}</button></div>
         <div v-if="loading" class="tip">加载中…</div>
+        <!-- 歌手列表 / Artist list -->
         <div v-else class="artist-list"><router-link v-for="artist in filteredArtists" :key="artist.name" :to="{ name:'artist', params:{ name:artist.name } }"><span class="avatar">{{ artist.name.slice(0,1) }}</span><span><strong>{{ artist.name }}</strong><small>{{ artist.songCount }} 首</small></span><em>›</em></router-link></div>
       </template>
+      <!-- 语种/分类模式 / Languages & tags mode -->
       <template v-else>
         <div v-if="loading" class="tip">加载中…</div>
+        <!-- 卡片网格 / Card grid -->
         <div v-else class="cards"><router-link v-for="item in currentItems" :key="item.name" :to="songLink(item)"><span>{{ iconFor(item.name) }}</span><strong>{{ item.name }}</strong><small>{{ item.songCount }} 首</small></router-link></div>
       </template>
     </main>
@@ -18,15 +24,28 @@
 </template>
 
 <script setup>
+/**
+ * 分类浏览页 — 按歌手首字母、语种或分类标签浏览歌曲库。
+ *
+ * Category browse page — browse the song library by artist initial,
+ * language, or category tag.
+ */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '../api/client'
 import TabBar from '../components/TabBar.vue'
 
 const route = useRoute()
+/** 顶部标签页：歌手 / 语种 / 分类。Top tabs: artists / languages / tags. */
 const tabs = [{ key:'artists',label:'歌手' },{ key:'languages',label:'语种' },{ key:'tags',label:'分类' }]
 const tab = ref(route.query.tab || 'artists'), artists = ref([]), languages = ref([]), tags = ref([]), activeLetter = ref('热门'), loading = ref(true)
 onMounted(load); watch(tab, load)
+
+/**
+ * 按当前标签页懒加载数据，每个分类只请求一次。
+ *
+ * Lazy-loads data for the active tab; each category is fetched at most once.
+ */
 async function load() {
   loading.value = true
   try {
@@ -35,10 +54,32 @@ async function load() {
     if (tab.value === 'tags' && !tags.value.length) tags.value = await api.browseTags()
   } finally { loading.value = false }
 }
+
+/** 可选首字母列表，热门置顶。Available initials, with "热门" pinned first. */
 const availableLetters = computed(() => ['热门', ...[...new Set(artists.value.map(item => item.initial))].sort()])
+
+/** 按选中首字母过滤歌手，热门取前30。Filter artists by selected initial; "热门" returns top 30. */
 const filteredArtists = computed(() => activeLetter.value === '热门' ? artists.value.slice(0,30) : artists.value.filter(item => item.initial === activeLetter.value))
+
+/** 当前标签页对应的数据列表。Data list for the current tab. */
 const currentItems = computed(() => tab.value === 'languages' ? languages.value : tags.value)
+
+/**
+ * 根据语种/标签生成歌曲列表路由链接。
+ *
+ * Builds a route link to the song list filtered by language or tag.
+ * @param {{ name: string }} item
+ * @returns {{ name: string, params: object, query: object }}
+ */
 function songLink(item) { return { name:'artist', params:{ name:'all' }, query:{ mode:tab.value === 'languages' ? 'language' : 'tag', value:item.name } } }
+
+/**
+ * 根据类别名称返回对应图标。
+ *
+ * Returns an emoji icon for the given category name.
+ * @param {string} name
+ * @returns {string}
+ */
 function iconFor(name) { if (/国语|粤语|英语|日语|韩语/.test(name)) return '🌏'; if (/儿歌|儿童/.test(name)) return '🧸'; if (/摇滚/.test(name)) return '🎸'; if (/情歌/.test(name)) return '💞'; return '🎶' }
 </script>
 
