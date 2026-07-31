@@ -91,6 +91,7 @@ export const api = {
   adminEditSong: (id, body) => request(`/admin/songs/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   adminDeleteSong: (id) => request(`/admin/songs/${id}`, { method: 'DELETE' }),
   adminDeleteSongs: (ids) => request('/admin/songs', { method: 'DELETE', body: JSON.stringify({ ids }) }),
+  adminMergeSong: (keepSongId, sourceSongId) => request(`/admin/songs/${keepSongId}/merge`, { method: 'POST', body: JSON.stringify({ sourceSongId }) }),
   adminTranscodeSong: (id) => request(`/admin/songs/${id}/transcode`, { method: 'POST' }),
   adminImports: (action = '', page = 0, size = 20) => request(`/admin/imports?action=${encodeURIComponent(action)}&page=${page}&size=${size}`),
   adminDeleteImportSource: (id) => request(`/admin/imports/${id}/source`, { method: 'DELETE' }),
@@ -125,6 +126,7 @@ export const api = {
   // ADM-04 AI song library and themed playlists
   adminAiTasks: () => request('/admin/ai/tasks'),
   adminAiCreateTask: (songId) => request('/admin/ai/tasks', { method: 'POST', body: JSON.stringify({ songId }) }),
+  adminAiCreateImportTask: (recordId) => request('/admin/ai/tasks/import-records', { method: 'POST', body: JSON.stringify({ recordId }) }),
   adminAiCreateUnclassified: (limit = 50) => request('/admin/ai/tasks/unclassified', { method: 'POST', body: JSON.stringify({ limit }) }),
   adminAiRetryTask: (id) => request(`/admin/ai/tasks/${id}/retry`, { method: 'POST' }),
   adminAiApplyTask: (id, result) => request(`/admin/ai/tasks/${id}/apply`, { method: 'POST', body: JSON.stringify(result) }),

@@ -47,6 +47,7 @@
               <td><span class="status" :class="statusClass(item.displayStatus)">{{ statusText(item.displayStatus) }}</span><small>{{ item.outputPath || item.reason || '—' }}</small></td>
               <td class="md5"><small>源：{{ shortMd5(item.sourceMd5) }}</small><small>输出：{{ shortMd5(item.outputMd5) }}</small></td>
               <td><div class="row-actions">
+                <button class="link action-button" :disabled="item.sourceDeleted" @click="analyzeImport(item)"><Sparkles :size="14" />AI 识别</button>
                 <button class="link action-button" :disabled="progress.running || !isTranscodable(item)" @click="transcodeOne(item)"><RefreshCw :size="14" />{{ progress.currentRecordId === item.id ? '转码中' : '转码' }}</button>
                 <button class="link priority-text action-button" :disabled="!canPrioritize(item)" @click="prioritize(item)"><ListRestart :size="14" />{{ priorityText(item) }}</button>
                 <button class="link danger-text action-button" :disabled="item.sourceDeleted" @click="deleteOne(item)"><Trash2 :size="14" />删除</button>
@@ -68,13 +69,15 @@
  * Source library management page — manages scanned source materials, duplicate detection, and transcode import tasks.
  */
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { ListRestart, RefreshCw, Trash2 } from 'lucide-vue-next'
+import { useRouter } from 'vue-router'
+import { ListRestart, RefreshCw, Sparkles, Trash2 } from 'lucide-vue-next'
 import api from '../../api/client'
 import AdminLayout from './AdminLayout.vue'
 import { alertDialog, confirmDialog } from '../../composables/useDialog'
 
 // 列表数据、分页、选中项 / List data, pagination, selected items
 const rows = ref([]), total = ref(0), page = ref(0), totalPages = ref(1), selected = ref([])
+const router = useRouter()
 const cleaning = ref(false)
 const filters = reactive({ keyword: '', status: '', formatAnalysis: '' })
 const progress = ref({ running:false, total:0, completed:0 })
@@ -100,6 +103,20 @@ async function load() { const r = await api.adminSourceLibrary({ ...filters, pag
  * Poll transcode progress; auto-clear timer and refresh list when task ends.
  */
 async function loadProgress() { progress.value = await api.adminSourceTranscodeProgress().catch(()=>progress.value); if (!progress.value.running && timer) { clearInterval(timer); timer=null; await load() } }
+
+async function analyzeImport(item) {
+  try {
+    await api.adminAiCreateImportTask(item.id)
+    await alertDialog('AI 识别任务已创建，可在“AI 曲库”中查看结果。')
+  } catch (error) {
+    if (String(error.message || '').includes('配置')) {
+      await alertDialog('请先在系统设置中配置 AI 模型。')
+      await router.push({ name: 'admin-settings', query: { section: 'ai' } })
+      return
+    }
+    await alertDialog(error.message || 'AI 识别任务创建失败')
+  }
+}
 
 /** 搜索：重置到第一页 / Search: reset to first page */
 function search(){ page.value=0; load() }

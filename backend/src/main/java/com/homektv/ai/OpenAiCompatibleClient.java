@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.homektv.domain.Song;
+import com.homektv.domain.MediaImportRecord;
 import com.homektv.repo.SongFileRepository;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -35,7 +36,18 @@ public class OpenAiCompatibleClient {
     }
 
     public AiSongClassification classify(Song song, String role) {
-        JsonNode value = completeJson(role, classificationSystemPrompt(), classificationUserPrompt(song), 1800);
+        return parseClassification(completeJson(role, classificationSystemPrompt(), classificationUserPrompt(song), 1800));
+    }
+
+    public AiSongClassification classifyImport(MediaImportRecord record, String role) {
+        String prompt = "导入记录 ID：" + record.getId() + "\n源文件：" + record.getSourceFilename()
+                + "\n源路径：" + record.getSourcePath() + "\n本地歌名：" + record.getParsedTitle()
+                + "\n本地歌手：" + record.getParsedArtist() + "\n媒体类型：" + record.getMediaType()
+                + "\n格式：" + record.getSourceFormat() + "\n现有判断：" + record.getReason();
+        return parseClassification(completeJson(role, classificationSystemPrompt(), prompt, 1800));
+    }
+
+    private AiSongClassification parseClassification(JsonNode value) {
         try {
             AiSongClassification result = mapper.treeToValue(value, AiSongClassification.class);
             validateClassification(result);

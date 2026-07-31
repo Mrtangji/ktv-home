@@ -4,11 +4,12 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.homektv.domain.AiAnalysisTask;
 import com.homektv.domain.Song;
+import com.homektv.domain.MediaImportRecord;
 import com.homektv.repo.AiAnalysisTaskRepository;
+import com.homektv.repo.MediaImportRecordRepository;
 import com.homektv.repo.SongRepository;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import com.homektv.web.ApiException;
 
 /**
@@ -25,10 +26,13 @@ public class AiAnalysisWorker {
     private final AiConfigService configService;
     private final AiAutoApplyPolicy autoApplyPolicy;
     private final AiClassificationApplier classificationApplier;
+    private final AiConcurrencyLimiter concurrencyLimiter;
+    private final MediaImportRecordRepository importRecordRepository;
 
     public AiAnalysisWorker(AiAnalysisTaskRepository taskRepository, SongRepository songRepository,
                             OpenAiCompatibleClient aiClient, ObjectMapper objectMapper, AiConfigService configService,
-                            AiAutoApplyPolicy autoApplyPolicy, AiClassificationApplier classificationApplier) {
+                            AiAutoApplyPolicy autoApplyPolicy, AiClassificationApplier classificationApplier,
+                            AiConcurrencyLimiter concurrencyLimiter, MediaImportRecordRepository importRecordRepository) {
         this.taskRepository = taskRepository;
         this.songRepository = songRepository;
         this.aiClient = aiClient;
@@ -36,6 +40,8 @@ public class AiAnalysisWorker {
         this.configService = configService;
         this.autoApplyPolicy = autoApplyPolicy;
         this.classificationApplier = classificationApplier;
+        this.concurrencyLimiter = concurrencyLimiter;
+        this.importRecordRepository = importRecordRepository;
     }
 
     /**
@@ -47,7 +53,6 @@ public class AiAnalysisWorker {
      * @param taskId AI 分析任务 ID / AI analysis task ID
      */
     @Async("aiBulkExecutor")
-    @Transactional
     public void analyze(Long taskId) {
         AiAnalysisTask task = taskRepository.findById(taskId).orElse(null);
         if (task == null) return;
@@ -57,14 +62,18 @@ public class AiAnalysisWorker {
         task.setErrorMessage(null);
         taskRepository.save(task);
         try {
-            Song song = songRepository.findById(task.getSongId())
+            boolean importTarget = "IMPORT_RECORD".equals(task.getTargetType());
+            Song song = importTarget ? null : songRepository.findById(task.getSongId())
                     .orElseThrow(() -> new IllegalStateException("歌曲不存在: " + task.getSongId()));
+            MediaImportRecord importRecord = importTarget ? importRecordRepository.findById(task.getTargetId())
+                    .orElseThrow(() -> new IllegalStateException("导入记录不存在: " + task.getTargetId())) : null;
             AiConfigService.ResolvedConfig config = configService.resolve();
-            AiSongClassification result = aiClient.classify(song, task.getModelRole());
-            // A pause request can arrive while the provider call is in flight.
-            // Do not apply a late result after the task has been paused.
-            AiAnalysisTask current = taskRepository.findById(taskId).orElse(task);
-            if ("paused".equals(current.getStatus())) return;
+            AiSongClassification result;
+            try (AiConcurrencyLimiter.Permit ignored = concurrencyLimiter.acquire(task.getModelRole())) {
+                result = importTarget ? aiClient.classifyImport(importRecord, task.getModelRole())
+                        : aiClient.classify(song, task.getModelRole());
+            }
+            if (isPaused(taskId)) return;
             if (config.reasoningModel() != null && !config.reasoningModel().isBlank()
                     && (result.titleConfidence() < config.identityThreshold()
                     || result.artistConfidence() < config.identityThreshold()
@@ -72,23 +81,45 @@ public class AiAnalysisWorker {
                     || result.vocalFormConfidence() < config.classificationThreshold())) {
                 task.setModelRole("REASONING");
                 task.setModel(config.modelFor("REASONING"));
-                result = aiClient.classify(song, "REASONING");
+                try (AiConcurrencyLimiter.Permit ignored = concurrencyLimiter.acquire("REASONING")) {
+                    result = importTarget ? aiClient.classifyImport(importRecord, "REASONING")
+                            : aiClient.classify(song, "REASONING");
+                }
+                if (isPaused(taskId)) return;
             }
             task.setResultJson(objectMapper.writeValueAsString(result));
             task.setFieldConfidence(objectMapper.writeValueAsString(java.util.Map.of(
                     "title", result.titleConfidence(), "artist", result.artistConfidence(),
                     "language", result.languageConfidence(), "vocalForm", result.vocalFormConfidence())));
             task.setEvidence(objectMapper.writeValueAsString(result.evidence()));
-            if (autoApplyPolicy.shouldAutoApply(result) && classificationApplier.applyAuto(task.getSongId(), result)) {
+            if (importTarget && applyImportRecord(importRecord, result, config.identityThreshold())) {
+                task.setStatus("auto_applied");
+            } else if (!importTarget && autoApplyPolicy.shouldAutoApply(result) && classificationApplier.applyAuto(task.getSongId(), result)) {
                 task.setStatus("auto_applied");
             } else {
                 task.setStatus("review");
             }
         } catch (Exception e) {
+            if (isPaused(taskId)) return;
             task.setStatus(e instanceof ApiException api && "AI_IDENTITY_CONFLICT".equals(api.getCode()) ? "review" : "failed");
             task.setErrorMessage(safeMessage(e));
         }
+        if (isPaused(taskId)) return;
         taskRepository.save(task);
+    }
+
+    private boolean isPaused(Long taskId) {
+        return taskRepository.findById(taskId).map(task -> "paused".equals(task.getStatus())).orElse(false);
+    }
+
+    private boolean applyImportRecord(MediaImportRecord record, AiSongClassification result, double threshold) {
+        if (result.title() == null || result.title().isBlank() || result.artist() == null || result.artist().isBlank()
+                || result.titleConfidence() < threshold || result.artistConfidence() < threshold) return false;
+        record.setParsedTitle(result.title().trim());
+        record.setParsedArtist(result.artist().trim());
+        record.setReason("AI 已优化文件身份：" + (result.reason() == null ? "" : result.reason()));
+        importRecordRepository.save(record);
+        return true;
     }
 
     // 安全截取异常信息（脱敏 API Key、限制长度 1000 字符）

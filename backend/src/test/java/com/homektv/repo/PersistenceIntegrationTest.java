@@ -2,11 +2,13 @@ package com.homektv.repo;
 
 import com.homektv.domain.PlayerState;
 import com.homektv.domain.Song;
+import com.homektv.library.SongMergeService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -44,6 +46,12 @@ class PersistenceIntegrationTest {
     @Autowired
     private PlayerStateRepository playerStateRepository;
 
+    @Autowired
+    private SongMergeService songMergeService;
+
+    @Autowired
+    private JdbcTemplate jdbc;
+
     @Test
     void playerStateSingletonInitialized() {
         PlayerState ps = playerStateRepository.getSingleton();
@@ -77,5 +85,40 @@ class PersistenceIntegrationTest {
         assertThat(found.getTags()).containsExactly("华语", "经典");
         assertThat(found.getLyricType()).isEqualTo("word");
         assertThat(found.isHasVocalTrack()).isTrue();
+    }
+
+    @Test
+    void mergeSongMigratesReferencesAndDeduplicatesUserLists() {
+        String suffix = String.valueOf(System.nanoTime());
+        Song keep = songRepository.save(song("保留歌曲", "歌手甲", "merge-keep-" + suffix));
+        Song source = songRepository.save(song("重复歌曲", "歌手乙", "merge-source-" + suffix));
+        Long userId = jdbc.queryForObject("INSERT INTO users (client_token, nickname) VALUES (?, ?) RETURNING id",
+                Long.class, "merge-user-" + suffix, "测试用户");
+        Long playlistId = jdbc.queryForObject("INSERT INTO playlists (name) VALUES (?) RETURNING id",
+                Long.class, "合并测试-" + suffix);
+        jdbc.update("INSERT INTO favorites (user_id, song_id) VALUES (?, ?), (?, ?)",
+                userId, keep.getId(), userId, source.getId());
+        jdbc.update("INSERT INTO playlist_songs (playlist_id, song_id, sort_order, manual) VALUES (?, ?, 8, false), (?, ?, 3, true)",
+                playlistId, keep.getId(), playlistId, source.getId());
+        jdbc.update("INSERT INTO queue (song_id, order_index) VALUES (?, 1)", source.getId());
+        jdbc.update("INSERT INTO play_history (song_id) VALUES (?)", source.getId());
+
+        songMergeService.merge(keep.getId(), source.getId());
+
+        assertThat(songRepository.findById(source.getId())).isEmpty();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM favorites WHERE user_id = ? AND song_id = ?", Long.class, userId, keep.getId())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM playlist_songs WHERE playlist_id = ? AND song_id = ?", Long.class, playlistId, keep.getId())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT manual FROM playlist_songs WHERE playlist_id = ? AND song_id = ?", Boolean.class, playlistId, keep.getId())).isTrue();
+        assertThat(jdbc.queryForObject("SELECT song_id FROM queue WHERE order_index = 1", Long.class)).isEqualTo(keep.getId());
+        assertThat(jdbc.queryForObject("SELECT song_id FROM play_history ORDER BY id DESC LIMIT 1", Long.class)).isEqualTo(keep.getId());
+    }
+
+    private Song song(String title, String artist, String fingerprint) {
+        Song song = new Song();
+        song.setTitle(title);
+        song.setArtist(artist);
+        song.setMediaType("AUDIO");
+        song.setFingerprint(fingerprint);
+        return song;
     }
 }

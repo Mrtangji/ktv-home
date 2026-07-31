@@ -51,6 +51,11 @@ public class AiLibraryController {
         return service.createTask(request.songId());
     }
 
+    @PostMapping("/tasks/import-records")
+    public AiAnalysisTask createImportTask(@RequestBody CreateImportTaskRequest request) {
+        return service.createImportTask(request.recordId());
+    }
+
     /**
      * 批量为未分类歌曲创建 AI 分析任务。
      *
@@ -104,7 +109,7 @@ public class AiLibraryController {
      * @return 更新后的歌曲 / the updated song
      */
     @PostMapping("/tasks/{id}/apply")
-    public Song apply(@PathVariable Long id, @RequestBody(required = false) AiSongClassification result) {
+    public Object apply(@PathVariable Long id, @RequestBody(required = false) AiSongClassification result) {
         return service.apply(id, result);
     }
 
@@ -246,6 +251,7 @@ public class AiLibraryController {
     }
 
     public record CreateTaskRequest(Long songId) {}
+    public record CreateImportTaskRequest(Long recordId) {}
     public record BatchRequest(Integer limit) {}
     public record GeneratePlaylistRequest(String name, String tag, Integer limit) {}
     public record PlaylistPreviewRequest(String instruction, Integer limit) {}

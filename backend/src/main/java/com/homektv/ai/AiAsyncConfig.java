@@ -9,8 +9,8 @@ public class AiAsyncConfig {
     @Bean(name = "aiBulkExecutor")
     public ThreadPoolTaskExecutor aiBulkExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(2);
-        executor.setMaxPoolSize(2);
+        executor.setCorePoolSize(10);
+        executor.setMaxPoolSize(10);
         executor.setQueueCapacity(1000);
         executor.setThreadNamePrefix("ai-bulk-");
         executor.initialize();
@@ -20,8 +20,8 @@ public class AiAsyncConfig {
     @Bean(name = "aiReasoningExecutor")
     public ThreadPoolTaskExecutor aiReasoningExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(1);
-        executor.setMaxPoolSize(1);
+        executor.setCorePoolSize(5);
+        executor.setMaxPoolSize(5);
         executor.setQueueCapacity(500);
         executor.setThreadNamePrefix("ai-reasoning-");
         executor.initialize();

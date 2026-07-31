@@ -16,4 +16,5 @@ public interface AiAnalysisTaskRepository extends JpaRepository<AiAnalysisTask, 
     List<AiAnalysisTask> findByBatchIdOrderByCreatedAtAsc(String batchId);
     boolean existsBySongIdAndStatusIn(Long songId, List<String> statuses);
     Optional<AiAnalysisTask> findFirstBySongIdAndStatusInOrderByCreatedAtDesc(Long songId, List<String> statuses);
+    boolean existsByTargetTypeAndTargetIdAndStatusIn(String targetType, Long targetId, List<String> statuses);
 }

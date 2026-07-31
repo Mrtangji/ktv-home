@@ -1,4 +1,4 @@
-import{f as B,_ as D,u as N,m as U,j as $,c as n,b as l,k as m,g as _,w as E,v as F,X as O,p as L,F as h,l as w,t as k,r as v,e as S,y as K,o,z as W,q as j,x as A}from"./index-B87gEFAX.js";import{S as G,T as Q}from"./TabBar-CMwl8bcB.js";import{S as R}from"./SongRow-CQ04sQwd.js";import"./plus-CWtize1M.js";/**
+import{f as B,_ as D,u as N,m as U,j as $,c as n,b as l,k as m,g as _,w as E,v as F,X as O,p as L,F as h,l as w,t as k,r as v,e as S,y as K,o,z as W,q as j,x as A}from"./index-Cn6fgigl.js";import{S as G,T as Q}from"./TabBar-xJ0_cT3F.js";import{S as R}from"./SongRow-Cf5KLXLC.js";import"./plus-dpOAdoYJ.js";/**
  * @license lucide-vue-next v0.577.0 - ISC
  *
  * This source code is licensed under the ISC license.

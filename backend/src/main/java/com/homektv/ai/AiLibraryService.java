@@ -11,6 +11,8 @@ import com.homektv.repo.AiAnalysisTaskRepository;
 import com.homektv.repo.PlaylistRepository;
 import com.homektv.repo.PlaylistSongRepository;
 import com.homektv.repo.SongRepository;
+import com.homektv.repo.MediaImportRecordRepository;
+import com.homektv.domain.MediaImportRecord;
 import com.homektv.web.ApiException;
 import org.springframework.stereotype.Service;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -41,12 +43,13 @@ public class AiLibraryService {
     private final AssetWriter assetWriter;
     private final AiClassificationApplier classificationApplier;
     private final OpenAiCompatibleClient aiClient;
+    private final MediaImportRecordRepository importRecordRepository;
 
     public AiLibraryService(AiAnalysisTaskRepository taskRepository, SongRepository songRepository,
                             PlaylistRepository playlistRepository, PlaylistSongRepository playlistSongRepository,
                             AiAnalysisWorker worker, ObjectMapper objectMapper, AiConfigService configService,
                             AssetWriter assetWriter, AiClassificationApplier classificationApplier,
-                            OpenAiCompatibleClient aiClient) {
+                            OpenAiCompatibleClient aiClient, MediaImportRecordRepository importRecordRepository) {
         this.taskRepository = taskRepository;
         this.songRepository = songRepository;
         this.playlistRepository = playlistRepository;
@@ -57,6 +60,7 @@ public class AiLibraryService {
         this.assetWriter = assetWriter;
         this.classificationApplier = classificationApplier;
         this.aiClient = aiClient;
+        this.importRecordRepository = importRecordRepository;
     }
 
     /**
@@ -88,6 +92,24 @@ public class AiLibraryService {
             }
             throw conflict;
         }
+        worker.analyze(task.getId());
+        return task;
+    }
+
+    public AiAnalysisTask createImportTask(Long recordId) {
+        requireAiConfigured();
+        importRecordRepository.findById(recordId)
+                .orElseThrow(() -> new ApiException("IMPORT_RECORD_NOT_FOUND", "导入记录不存在"));
+        if (taskRepository.existsByTargetTypeAndTargetIdAndStatusIn("IMPORT_RECORD", recordId, ACTIVE_STATUSES))
+            throw new ApiException("AI_TASK_EXISTS", "该导入记录已有待处理的 AI 任务");
+        AiConfigService.ResolvedConfig config = configService.resolve();
+        AiAnalysisTask task = new AiAnalysisTask();
+        task.setTargetType("IMPORT_RECORD");
+        task.setTargetId(recordId);
+        task.setSongId(null);
+        task.setModel(config.bulkModel());
+        task.setModelRole("BULK");
+        task = taskRepository.saveAndFlush(task);
         worker.analyze(task.getId());
         return task;
     }
@@ -467,15 +489,27 @@ public class AiLibraryService {
      * @return 更新后的歌曲实体 / updated song entity
      */
     @Transactional
-    public Song apply(Long taskId, AiSongClassification override) {
+    public Object apply(Long taskId, AiSongClassification override) {
         AiAnalysisTask task = requireTask(taskId);
         if (!"review".equals(task.getStatus())) throw new ApiException("INVALID_AI_TASK", "任务不处于待确认状态");
         AiSongClassification result = override == null ? parse(task.getResultJson()) : override;
-        Song song = classificationApplier.apply(task.getSongId(), result);
+        Object target;
+        if ("IMPORT_RECORD".equals(task.getTargetType())) {
+            MediaImportRecord record = importRecordRepository.findById(task.getTargetId())
+                    .orElseThrow(() -> new ApiException("IMPORT_RECORD_NOT_FOUND", "导入记录不存在"));
+            if (result.title() == null || result.title().isBlank())
+                throw new ApiException("AI_RESULT_INVALID", "歌名不能为空");
+            record.setParsedTitle(result.title().trim());
+            record.setParsedArtist(result.artist() == null ? "" : result.artist().trim());
+            record.setReason("人工确认 AI 文件身份：" + (result.reason() == null ? "" : result.reason()));
+            target = importRecordRepository.save(record);
+        } else {
+            target = classificationApplier.apply(task.getSongId(), result);
+        }
         task.setStatus("applied");
         task.setResultJson(write(result));
         taskRepository.save(task);
-        return song;
+        return target;
     }
 
     /**

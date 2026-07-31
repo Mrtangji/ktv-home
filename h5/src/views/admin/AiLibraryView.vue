@@ -25,12 +25,27 @@
         <button class="btn ghost" @click="repairLibrary" :disabled="busy || !aiConfigured">修复现有曲库</button>
       </div>
 
+      <div v-if="repairBatchId" class="repair-status card">
+        <div>
+          <strong>修复批次 {{ repairBatchId }}</strong>
+          <span>{{ repairProgress.completed || 0 }} / {{ repairProgress.total || 0 }}</span>
+          <span>待审核 {{ repairProgress.review || 0 }}</span>
+          <span>失败 {{ repairProgress.failed || 0 }}</span>
+          <span v-if="repairProgress.paused">已暂停 {{ repairProgress.paused }}</span>
+        </div>
+        <div class="actions">
+          <button v-if="repairProgress.running" class="btn ghost" @click="pauseRepair" :disabled="busy">暂停</button>
+          <button v-if="repairProgress.paused" class="btn ghost" @click="resumeRepair" :disabled="busy">继续</button>
+          <button v-if="repairProgress.failed" class="btn ghost" @click="retryFailedRepair" :disabled="busy">重试失败项</button>
+        </div>
+      </div>
+
       <div v-if="!aiConfigured" class="notice warning">AI 尚未配置，扫描和入库仍会使用本地解析。<router-link :to="{name:'admin-settings',query:{section:'ai'}}">去配置</router-link></div><div v-if="message" class="notice">{{ message }}</div>
       <!-- 任务列表 / Task list -->
       <div class="task-list">
         <article v-for="task in tasks" :key="task.id" class="task card" :class="`status-${task.status}`">
           <div class="task-top">
-            <div><strong>任务 #{{ task.id }}</strong><span class="song-id">歌曲 #{{ task.songId }}</span></div>
+            <div><strong>任务 #{{ task.id }}</strong><span class="song-id">{{ task.targetType === 'IMPORT_RECORD' ? `导入记录 #${task.targetId}` : `歌曲 #${task.songId}` }}</span></div>
             <span class="status">{{ statusLabel(task.status) }}</span>
           </div>
           <div class="meta">模型 {{ task.model }} · 置信度 <b :class="confidenceClass(task)">{{ confidenceText(task) }}</b> · 已尝试 {{ task.attemptCount }} 次 · {{ formatTime(task.createdAt) }}</div>
@@ -49,7 +64,7 @@
               <div class="field wide"><label>推荐歌单（逗号分隔）</label><input v-model="draft(task).playlistsText" /></div>
               <div class="field wide"><label>判断说明</label><textarea v-model="draft(task).reason" rows="2"></textarea></div>
             </div>
-            <div class="actions"><button class="btn" @click="applyTask(task)" :disabled="busy">确认并应用</button></div>
+            <div class="actions"><button class="btn" @click="applyTask(task)" :disabled="busy">确认并应用</button><template v-if="task.targetType !== 'IMPORT_RECORD'"><input v-model.number="mergeTargets[task.id]" class="merge-id" type="number" min="1" placeholder="保留歌曲 ID" /><button class="btn ghost" @click="mergeTaskSong(task)" :disabled="busy || !mergeTargets[task.id]">合并重复歌曲</button></template></div>
           </div>
           <div v-if="task.status === 'failed'" class="actions"><button class="btn ghost" @click="retryTask(task.id)" :disabled="busy">重试</button></div>
         </article>
@@ -140,6 +155,7 @@ const busy = ref(false)
 const message = ref('')
 const tasks = ref([])
 const drafts = reactive({})
+const mergeTargets = reactive({})
 const singleSongId = ref(null)
 const batchLimit = ref(50)
 const playlists = ref([])
@@ -150,6 +166,8 @@ const generateForm = reactive({ name: '', tag: '', limit: 100 })
 const playlistInstruction = ref('')
 const playlistPreview = ref(null)
 const aiConfigured = ref(false)
+const repairBatchId = ref('')
+const repairProgress = reactive({ total: 0, completed: 0, review: 0, failed: 0, paused: 0, running: false })
 const playlistForm = reactive({ id: null, name: '', description: '', theme: '', publicVisible: true })
 
 onMounted(refreshAll)
@@ -227,7 +245,11 @@ async function createSingle() {
 async function createBatch() {
   await run(async () => { const result = await api.adminAiCreateUnclassified(batchLimit.value); flash(`已创建 ${result.created} 个任务`); await loadTasks() })
 }
-async function repairLibrary() { await run(async () => { const result = await api.adminAiRepair(); flash(`已创建 ${result.created} 个存量修复任务，批次 ${result.batchId}`); await loadTasks() }) }
+async function repairLibrary() { await run(async () => { const result = await api.adminAiRepair(); repairBatchId.value = result.batchId; await loadRepairProgress(); flash(`已创建 ${result.created} 个存量修复任务`); await loadTasks() }) }
+async function loadRepairProgress() { if (!repairBatchId.value) return; Object.assign(repairProgress, await api.adminAiRepairProgress(repairBatchId.value)) }
+async function pauseRepair() { await run(async () => { Object.assign(repairProgress, await api.adminAiPauseRepair(repairBatchId.value)); await loadTasks() }) }
+async function resumeRepair() { await run(async () => { await api.adminAiResumeRepair(repairBatchId.value); await loadRepairProgress(); await loadTasks() }) }
+async function retryFailedRepair() { await run(async () => { await api.adminAiRetryFailedRepair(repairBatchId.value); await loadRepairProgress(); await loadTasks() }) }
 /** 重试失败的 AI 任务 / Retry a failed AI task */
 async function retryTask(id) { await run(async () => { await api.adminAiRetryTask(id); delete drafts[id]; await loadTasks() }) }
 /**
@@ -248,6 +270,11 @@ async function applyTask(task) {
     flash('AI 标签已应用到歌曲')
     await loadTasks()
   })
+}
+async function mergeTaskSong(task) {
+  const keepId = mergeTargets[task.id]
+  if (!await confirmDialog(`歌曲 #${task.songId} 的文件源和全部引用将迁移到歌曲 #${keepId}。`, { title: '合并重复歌曲', tone: 'warning' })) return
+  await run(async () => { await api.adminMergeSong(keepId, task.songId); delete mergeTargets[task.id]; flash('重复歌曲已合并'); await loadTasks() })
 }
 
 /** 重置表单以新建歌单 / Reset form to create a new playlist */
@@ -376,6 +403,7 @@ h1 { font-size:22px; margin:0 0 5px; } .head p { margin:0; color:var(--dim2); fo
 .tabs button.on { color:var(--gold); border-color:var(--gold); }
 .card { background:var(--panel2); border:1px solid var(--glass-border); border-radius:var(--radius); padding:16px; }
 .toolbar { gap:12px; flex-wrap:wrap; }.divider { width:1px; height:34px; background:var(--line); margin:0 4px; }.notice.warning{background:rgba(240,199,66,.1);padding:10px;border-radius:8px}.notice.warning a{color:var(--gold);margin-left:5px}.preview-box{margin-top:12px;padding:12px;border:1px solid rgba(240,199,66,.25);border-radius:8px}.preview-box p{margin:5px 0;color:var(--dim);font-size:12px}.preview-songs{color:var(--dim2);font-size:11px;margin-bottom:10px}
+.repair-status{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-top:12px}.repair-status>div:first-child{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.repair-status span{color:var(--dim2);font-size:11px}.repair-status .actions{margin-top:0}
 .field { display:flex; flex-direction:column; gap:6px; }.field label { color:var(--dim2); font-size:11px; }
 .field.compact { flex-direction:row; align-items:center; }.field.compact label { font-size:12px; }
 input,textarea { background:rgba(255,255,255,.035); border:1px solid var(--glass-border); border-radius:8px; padding:9px 11px; color:var(--text); outline:none; font:inherit; }
@@ -384,6 +412,7 @@ input:focus,textarea:focus { border-color:rgba(240,199,66,.45); }.toolbar input 
 .task-top { justify-content:space-between; }.song-id { color:var(--dim); font-size:12px; margin-left:12px; }.status { font-size:11px; border-radius:999px; padding:4px 10px; background:rgba(255,255,255,.06); color:var(--dim); }
 .meta { color:var(--dim2); font-size:11px; margin-top:7px; }.meta b{font-weight:700}.confidence-high{color:var(--green)}.confidence-low{color:var(--gold)}.error { color:#ff8b8b; background:rgba(239,68,68,.08); padding:9px 11px; border-radius:8px; margin-top:10px; font-size:12px; }
 .result { margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }.result-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }.field.wide { grid-column:1/-1; }.actions { gap:9px; margin-top:14px; }
+.merge-id{width:120px}
 .playlist-layout { display:grid; grid-template-columns:260px minmax(0,1fr); gap:16px; }.playlist-main { display:grid; gap:16px; }.section-title { justify-content:space-between; margin-bottom:13px; }.section-title span { color:var(--dim2); font-size:11px; }
 .playlist-item { width:100%; display:flex; align-items:center; justify-content:space-between; text-align:left; background:none; border:1px solid transparent; padding:11px; border-radius:9px; color:var(--text); cursor:pointer; }.playlist-item:hover,.playlist-item.on { background:var(--gold-glow); border-color:rgba(240,199,66,.15); }.playlist-item span { display:flex; flex-direction:column; gap:4px; }.playlist-item small { color:var(--dim2); }.playlist-item em,.source { font-style:normal; color:var(--gold); font-size:10px; border:1px solid rgba(240,199,66,.25); padding:2px 6px; border-radius:999px; }
 .inline-form { gap:9px; }.inline-form input { flex:1; }.inline-form .short { max-width:72px; }.check { display:flex; align-items:center; gap:7px; color:var(--dim); font-size:12px; margin-top:13px; }.check input { width:auto; }

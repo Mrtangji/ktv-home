@@ -8,6 +8,7 @@ import com.homektv.library.SettingService;
 import com.homektv.library.TranscodeService;
 import com.homektv.library.TranscodeHardwareService;
 import com.homektv.library.SongReparseService;
+import com.homektv.library.SongMergeService;
 import com.homektv.domain.Song;
 import com.homektv.domain.MediaImportRecord;
 import com.homektv.web.dto.DashboardDto;
@@ -39,12 +40,14 @@ public class AdminScanController {
     private final TranscodeService transcodeService;
     private final TranscodeHardwareService transcodeHardwareService;
     private final SongReparseService reparseService;
+    private final SongMergeService songMergeService;
 
     public AdminScanController(LibraryScanService scanService, LibraryWatchService libraryWatchService,
                                AdminService adminService,
                                MediaImportService mediaImportService,
                                SettingService settingService, TranscodeService transcodeService,
-                               TranscodeHardwareService transcodeHardwareService, SongReparseService reparseService) {
+                               TranscodeHardwareService transcodeHardwareService, SongReparseService reparseService,
+                               SongMergeService songMergeService) {
         this.scanService = scanService;
         this.libraryWatchService = libraryWatchService;
         this.adminService = adminService;
@@ -53,6 +56,7 @@ public class AdminScanController {
         this.transcodeService = transcodeService;
         this.transcodeHardwareService = transcodeHardwareService;
         this.reparseService = reparseService;
+        this.songMergeService = songMergeService;
     }
 
     /**
@@ -311,6 +315,11 @@ public class AdminScanController {
         return Map.of("status", "deleted", "deleted", adminService.deleteSongs(request.ids()));
     }
 
+    @PostMapping("/songs/{id}/merge")
+    public Map<String, Object> mergeSong(@PathVariable Long id, @RequestBody MergeSongRequest request) {
+        return songMergeService.merge(id, request.sourceSongId());
+    }
+
     /**
      * 伴奏轨低置信度复核列表：入库判不准原伴唱、需人工核对的文件源。
      *
@@ -426,6 +435,7 @@ public class AdminScanController {
     }
 
     public record ReparseRequest(List<Long> songIds, String rule) {}
+    public record MergeSongRequest(Long sourceSongId) {}
     public record PriorityTranscodeRequest(Long id) {}
     public record SongIdsRequest(List<Long> ids) {
         public SongIdsRequest {
