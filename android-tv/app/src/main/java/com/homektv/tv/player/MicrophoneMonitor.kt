@@ -191,6 +191,9 @@ class MicrophoneMonitor(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (audioManager.setCommunicationDevice(input)) communicationDevice = input
         } else {
+            if (!audioManager.isBluetoothScoAvailableOffCall) {
+                throw IllegalStateException("当前设备不支持蓝牙麦克风通话音频")
+            }
             @Suppress("DEPRECATION")
             audioManager.startBluetoothSco()
             @Suppress("DEPRECATION")
@@ -242,22 +245,33 @@ class MicrophoneMonitor(
 
 object MicrophoneInputSelector {
     private val defaultRoutedInputModels = setOf("Q601F")
-    private val bluetoothTypes = setOf(
-        AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
-        AudioDeviceInfo.TYPE_BLE_HEADSET,
-    )
-    private val supportedTypes = bluetoothTypes + setOf(
+    private val externalInputTypes = setOf(
         AudioDeviceInfo.TYPE_WIRED_HEADSET,
         AudioDeviceInfo.TYPE_USB_DEVICE,
         AudioDeviceInfo.TYPE_USB_HEADSET,
+        AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
     )
 
-    fun isSupportedExternalInput(device: AudioDeviceInfo): Boolean = device.isSource && device.type in supportedTypes
-    fun isBluetoothInput(device: AudioDeviceInfo): Boolean = device.type in bluetoothTypes
+    fun isSupportedExternalInput(device: AudioDeviceInfo): Boolean =
+        device.isSource && isSupportedType(device.type, Build.VERSION.SDK_INT)
+
+    fun isBluetoothInput(device: AudioDeviceInfo): Boolean =
+        isBluetoothType(device.type, Build.VERSION.SDK_INT)
+
+    internal fun isSupportedType(type: Int, sdkInt: Int): Boolean =
+        type in externalInputTypes || isBleHeadset(type, sdkInt)
+
+    internal fun isBluetoothType(type: Int, sdkInt: Int): Boolean =
+        type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || isBleHeadset(type, sdkInt)
+
+    @SuppressLint("InlinedApi")
+    private fun isBleHeadset(type: Int, sdkInt: Int): Boolean =
+        sdkInt >= Build.VERSION_CODES.S && type == AudioDeviceInfo.TYPE_BLE_HEADSET
     fun allowsDefaultRoutedInput(model: String): Boolean = model.uppercase() in defaultRoutedInputModels
 
     fun priority(device: AudioDeviceInfo): Int = priority(device.type)
 
+    @SuppressLint("InlinedApi")
     fun priority(type: Int): Int = when (type) {
         AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE -> 0
         AudioDeviceInfo.TYPE_WIRED_HEADSET -> 1
@@ -266,6 +280,7 @@ object MicrophoneInputSelector {
         else -> 100
     }
 
+    @SuppressLint("InlinedApi")
     fun label(type: Int): String = when (type) {
         AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE -> "USB 麦克风"
         AudioDeviceInfo.TYPE_WIRED_HEADSET -> "有线麦克风"

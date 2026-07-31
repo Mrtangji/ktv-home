@@ -40,7 +40,7 @@ Home KTV 是一套运行在家庭 NAS 或 Linux 主机上的局域网点歌系�
 - 遥控器控制播放、队列、音量和原伴唱
 - 断线重连、状态恢复、待机轮播和防烧屏微移
 - 播放页显示“微信扫码点歌”二维码
-- 支持 Android 10 及以上版本
+- 支持 Android 8.0（API 26）及以上版本
 
 ### 曲库管理
 
@@ -81,7 +81,7 @@ Home KTV 服务端 ───── PostgreSQL
 - 支持 Docker Compose 的 NAS、Linux 主机或 Docker Desktop
 - 建议至少 1 GB 可用内存
 - 手机、Android TV 和服务端位于同一局域网
-- Android TV 10 或更高版本
+- Android TV 8.0（API 26）或更高版本
 
 ### 1. 配置目录和密码
 
