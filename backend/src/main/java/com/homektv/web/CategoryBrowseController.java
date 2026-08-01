@@ -45,11 +45,12 @@ public class CategoryBrowseController {
      */
     @GetMapping("/songs")
     public List<SongDto> songs(@RequestParam(required = false) String artist,
+                               @RequestParam(required = false) String artistGender,
                                @RequestParam(required = false) String language,
                                @RequestParam(required = false) String tag,
                                @RequestParam(required = false) String vocalForm,
                                @RequestParam(defaultValue = "hot") String sort,
                                @RequestParam(defaultValue = "100") int limit) {
-        return service.songs(artist, language, tag, vocalForm, sort, limit);
+        return service.songs(artist, artistGender, language, tag, vocalForm, sort, limit);
     }
 }

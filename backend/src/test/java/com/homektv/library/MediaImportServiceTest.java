@@ -78,9 +78,15 @@ class MediaImportServiceTest {
     }
 
     @Test
-    void scanAutomaticallyCopiesCompatibleVideo() throws Exception {
+    void scanAutomaticallyMovesCompatibleVideo() throws Exception {
         Path source = sourceDir.resolve("周杰伦 - 晴天.mp4");
         Files.writeString(source, "compatible-media");
+        MediaImportRecord previousRecord = new MediaImportRecord();
+        previousRecord.setSourcePath(source.toString());
+        when(importRepo.findBySourcePath(source.toString())).thenReturn(Optional.of(previousRecord));
+        SongFile songFile = new SongFile();
+        songFile.setId(2L);
+        when(songFileRepo.findById(2L)).thenReturn(Optional.of(songFile));
         when(probe.probe(source)).thenReturn(new MediaProbe(1000, 2, 0, true, "1920x1080",
                 List.of(), "h264", "aac"));
 
@@ -88,9 +94,12 @@ class MediaImportServiceTest {
 
         assertThat(result.copied()).isEqualTo(1);
         assertThat(result.pendingTranscode()).isZero();
+        assertThat(source).doesNotExist();
         assertThat(Files.exists(targetDir.resolve(source.getFileName()))).isTrue();
-        assertThat(saved.getLast().getAction()).isEqualTo(MediaImportService.COPIED);
+        assertThat(songFile.isSourceDeleted()).isTrue();
         verify(scanService).ingestLibraryFile(any(), eq(source), anyString(), anyString(), eq(false));
+        verify(importRepo).delete(previousRecord);
+        verify(importRepo, never()).saveAndFlush(any());
     }
 
     @Test
@@ -105,10 +114,48 @@ class MediaImportServiceTest {
         assertThat(result.pendingTranscode()).isEqualTo(1);
         assertThat(result.copied()).isZero();
         assertThat(saved.getLast().getAction()).isEqualTo(MediaImportService.PENDING_TRANSCODE);
+        assertThat(saved.getLast().getReason()).contains(
+                "容器 mpg 未加入直拷白名单",
+                "视频编码 mpeg2video 未加入直拷白名单",
+                "音频编码 ac3 未加入直拷白名单");
         try (Stream<Path> files = Files.list(targetDir)) {
             assertThat(files).isEmpty();
         }
         verifyNoInteractions(scanService);
+    }
+
+    @Test
+    void rescanMovesExistingPendingFileWhenCurrentWhitelistNowAllowsIt() throws Exception {
+        Path source = sourceDir.resolve("歌手 - 规则已放行.mpg");
+        Files.writeString(source, "compatible-after-policy-change");
+        MediaImportRecord pending = new MediaImportRecord();
+        pending.setId(30L);
+        pending.setSourcePath(source.toString());
+        pending.setSourceFilename(source.getFileName().toString());
+        pending.setSourceMd5(new FileHashService().md5(source));
+        pending.setSourceFormat("mpg");
+        pending.setMediaType(MediaClassifier.MV);
+        pending.setVideoCodec("mpeg2video");
+        pending.setAudioCodec("ac3");
+        pending.setAction(MediaImportService.PENDING_TRANSCODE);
+        pending.setTranscodeRequired(true);
+        when(importRepo.findBySourcePath(source.toString())).thenReturn(Optional.of(pending));
+        when(settingService.transcodePolicy()).thenReturn(new SettingService.TranscodePolicy(
+                List.of("mp4", "mpg"), List.of("h264", "mpeg2video"), List.of("aac", "ac3"),
+                false, "mkv", "h264", "aac", false));
+        when(probe.probe(source)).thenReturn(new MediaProbe(1000, 1, 0, true, "1920x1080",
+                List.of(), "mpeg2video", "ac3"));
+        SongFile songFile = new SongFile();
+        songFile.setId(2L);
+        when(songFileRepo.findById(2L)).thenReturn(Optional.of(songFile));
+
+        MediaImportService.SourceScanResult result = service.scanSourceLibrary();
+
+        assertThat(result.copied()).isEqualTo(1);
+        assertThat(result.pendingTranscode()).isZero();
+        assertThat(source).doesNotExist();
+        assertThat(targetDir.resolve(source.getFileName())).exists();
+        verify(importRepo).delete(pending);
     }
 
     @Test
@@ -190,11 +237,31 @@ class MediaImportServiceTest {
         assertThat(failed.failed()).isEqualTo(1);
         assertThat(succeeded.copied()).isEqualTo(1);
         assertThat(persisted.get()).isSameAs(original);
-        assertThat(original.getAction()).isEqualTo(MediaImportService.COPIED);
-        assertThat(original.isImportedFlag()).isTrue();
+        assertThat(source).doesNotExist();
+        assertThat(targetDir.resolve(source.getFileName())).exists();
         assertThat(service.getScanProgress().running()).isFalse();
         assertThat(service.getScanProgress().completed()).isEqualTo(1);
-        verify(importRepo, times(2)).saveAndFlush(same(original));
+        verify(importRepo).saveAndFlush(same(original));
+        verify(importRepo).delete(original);
+    }
+
+    @Test
+    void scanRestoresMovedFileWhenLibraryIngestFails() throws Exception {
+        Path source = sourceDir.resolve("歌手 - 入库失败.mp4");
+        Path target = targetDir.resolve(source.getFileName());
+        Files.writeString(source, "compatible-media");
+        when(probe.probe(source)).thenReturn(new MediaProbe(1000, 2, 0, true, "1920x1080",
+                List.of(), "h264", "aac"));
+        when(scanService.ingestLibraryFile(any(), eq(source), anyString(), anyString(), eq(false)))
+                .thenThrow(new IllegalStateException("database unavailable"));
+
+        MediaImportService.SourceScanResult result = service.scanSourceLibrary();
+
+        assertThat(result.failed()).isEqualTo(1);
+        assertThat(source).exists();
+        assertThat(target).doesNotExist();
+        assertThat(saved.getLast().getAction()).isEqualTo(MediaImportService.FAILED);
+        verify(importRepo, never()).delete(any());
     }
 
     @Test
@@ -248,6 +315,31 @@ class MediaImportServiceTest {
         assertThat(importedOutput).exists();
         assertThat(pendingSource).exists();
         verify(importRepo).delete(imported);
+        verify(importRepo, never()).save(imported);
+    }
+
+    @Test
+    void deleteSourcesRemovesRecordAfterDeletingFile() throws Exception {
+        Path source = sourceDir.resolve("歌手 - 待删除.mp4");
+        Files.writeString(source, "source");
+        MediaImportRecord record = pendingRecord(12L, source.getFileName().toString());
+        when(importRepo.findByIdIn(List.of(12L))).thenReturn(List.of(record));
+
+        MediaImportService.DeleteSourcesResult result = service.deleteSources(List.of(12L));
+
+        assertThat(result.requested()).isEqualTo(1);
+        assertThat(result.deleted()).isEqualTo(1);
+        assertThat(result.failed()).isZero();
+        assertThat(source).doesNotExist();
+        verify(importRepo).delete(record);
+        verify(importRepo, never()).save(record);
+    }
+
+    @Test
+    void sourceLibraryHidesRemovedSourceRecordsByDefault() {
+        service.listSourceLibrary("", "", "", null, 0, 20);
+
+        verify(importRepo).searchSourceLibrary(eq(""), isNull(), isNull(), isNull(), eq(false), any());
     }
 
     @Test

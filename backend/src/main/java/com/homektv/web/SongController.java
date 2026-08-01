@@ -112,7 +112,7 @@ public class SongController {
     private ResponseEntity<Resource> serveFile(String relPath, MediaType type) {
         Path file = dataRoot.resolve(relPath).normalize();
         // 防目录穿越：必须仍在 dataRoot 下
-        if (!file.startsWith(dataRoot.normalize()) || !Files.isReadable(file)) {
+        if (!file.startsWith(dataRoot.normalize()) || !Files.isRegularFile(file) || !Files.isReadable(file)) {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.ok().contentType(type).body(new FileSystemResource(file));

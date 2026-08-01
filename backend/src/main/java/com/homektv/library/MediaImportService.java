@@ -11,8 +11,8 @@ import com.homektv.web.ApiException;
 import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
@@ -202,28 +202,16 @@ public class MediaImportService {
 
     public Page<MediaImportRecord> listSourceLibrary(String keyword, String status, String formatAnalysis,
                                                      Boolean sourceDeleted, int page, int size) {
-        List<MediaImportRecord> filtered = filterSourceLibrary(keyword, status, formatAnalysis, sourceDeleted);
         int safeSize = Math.max(1, Math.min(size, 200));
         int safePage = Math.max(0, page);
-        int from = Math.min(safePage * safeSize, filtered.size());
-        int to = Math.min(from + safeSize, filtered.size());
-        return new PageImpl<>(filtered.subList(from, to), PageRequest.of(safePage, safeSize), filtered.size());
+        SourceLibraryFilters filters = sourceLibraryFilters(status, formatAnalysis, sourceDeleted);
+        return importRepo.searchSourceLibrary(normalizeKeyword(keyword), filters.action(),
+                filters.duplicateFlag(), filters.transcodeRequired(), filters.sourceDeleted(),
+                PageRequest.of(safePage, safeSize));
     }
 
-    private List<MediaImportRecord> filterSourceLibrary(String keyword, String status, String formatAnalysis,
-                                                        Boolean sourceDeleted) {
-        purgeMissingSourceRecords();
-        String normalizedKeyword = lower(keyword);
-        return importRepo.findAllByOrderByCreatedAtDesc().stream()
-                .filter(record -> normalizedKeyword.isBlank()
-                        || lower(record.getSourceFilename()).contains(normalizedKeyword)
-                        || lower(record.getParsedTitle()).contains(normalizedKeyword)
-                        || lower(record.getParsedArtist()).contains(normalizedKeyword))
-                .filter(record -> matchesStatus(record, status))
-                .filter(record -> matchesFormat(record, formatAnalysis))
-                .filter(record -> sourceDeleted == null || record.isSourceDeleted() == sourceDeleted)
-                .toList();
-    }
+    private record SourceLibraryFilters(String action, Boolean duplicateFlag,
+                                        Boolean transcodeRequired, Boolean sourceDeleted) {}
 
     public TranscodeProgress startPendingTranscode(Collection<Long> recordIds, boolean all) {
         if (!all && (recordIds == null || recordIds.isEmpty())) {
@@ -310,7 +298,7 @@ public class MediaImportService {
                 Files.deleteIfExists(source);
                 removeSourceRecord(record);
                 deleted++;
-            } catch (IOException e) {
+            } catch (Exception e) {
                 failed++;
             }
         }
@@ -334,7 +322,7 @@ public class MediaImportService {
             try {
                 deleteSourceAndCompanions(record);
                 deleted++;
-            } catch (IOException e) {
+            } catch (Exception e) {
                 failed++;
             }
         }
@@ -349,8 +337,7 @@ public class MediaImportService {
             record.setCleanupStatus("PENDING");
             importRepo.save(record);
             if (isSafelyImported(record)) {
-                cleanupImportedRecord(record.getId());
-                if (record.isSourceDeleted()) cleaned++;
+                if (cleanupImportedRecord(record.getId())) cleaned++;
             }
         }
         return cleaned;
@@ -379,7 +366,10 @@ public class MediaImportService {
 
     public DeleteSourcesResult deleteSourcesByFilter(String keyword, String status, String formatAnalysis,
                                                      Boolean sourceDeleted) {
-        List<Long> ids = filterSourceLibrary(keyword, status, formatAnalysis, sourceDeleted).stream()
+        SourceLibraryFilters filters = sourceLibraryFilters(status, formatAnalysis, sourceDeleted);
+        List<Long> ids = importRepo.searchSourceLibrary(normalizeKeyword(keyword), filters.action(),
+                        filters.duplicateFlag(), filters.transcodeRequired(), filters.sourceDeleted(), Pageable.unpaged())
+                .getContent().stream()
                 .map(MediaImportRecord::getId)
                 .toList();
         return deleteSources(ids);
@@ -398,9 +388,20 @@ public class MediaImportService {
     private ScanOutcome analyzeAndMaybeCopy(Path source, Path targetRoot) throws IOException {
         String sourceMd5 = hashService.md5(source);
         MediaImportRecord existing = importRepo.findBySourcePath(source.toString()).orElse(null);
-        if (existing != null && Objects.equals(existing.getSourceMd5(), sourceMd5)
-                && (existing.isImportedFlag() || PENDING_TRANSCODE.equals(existing.getAction()))) {
-            return ScanOutcome.UNCHANGED;
+        if (existing != null && Objects.equals(existing.getSourceMd5(), sourceMd5)) {
+            if (existing.isImportedFlag()) return ScanOutcome.UNCHANGED;
+            if (PENDING_TRANSCODE.equals(existing.getAction()) && hasStoredFormatAnalysis(existing)) {
+                DirectCopyDecision previousDecision = directCopyDecision(
+                        existing.getSourceFormat(), existing.getVideoCodec(), existing.getAudioCodec(),
+                        !MediaClassifier.AUDIO.equals(existing.getMediaType()));
+                if (previousDecision.transcodeRequired()) {
+                    if (!Objects.equals(existing.getReason(), previousDecision.reason())) {
+                        existing.setReason(previousDecision.reason());
+                        importRepo.save(existing);
+                    }
+                    return ScanOutcome.UNCHANGED;
+                }
+            }
         }
 
         MediaProbe probe = ffprobeService.probe(source);
@@ -409,7 +410,8 @@ public class MediaImportService {
                 ? ParsedMeta.of(tag.getTitle(), tag.getArtist())
                 : FilenameParser.parse(source.getFileName().toString());
         boolean recognized = parsed.recognized();
-        boolean transcodeRequired = requiresTranscode(source, probe);
+        DirectCopyDecision directCopy = directCopyDecision(source, probe);
+        boolean transcodeRequired = directCopy.transcodeRequired();
         if (!recognized) {
             upsertRecord(source, sourceMd5, null, probe, null, UNRECOGNIZED,
                     "文件名无法识别歌名和歌手", transcodeRequired, false, false, null, null);
@@ -422,21 +424,32 @@ public class MediaImportService {
         }
         if (transcodeRequired) {
             upsertRecord(source, sourceMd5, null, probe, null, PENDING_TRANSCODE,
-                    "格式不满足 Android TV 流畅播放要求，等待批量转码", true, false, false, null, null);
+                    directCopy.reason(), true, false, false, null, null);
             return ScanOutcome.PENDING;
         }
 
-        Path output = copyToTarget(source, targetRoot);
-        String outputMd5 = hashService.md5(output);
-        if (isOutputDuplicate(source, outputMd5)) {
-            Files.deleteIfExists(output);
-            upsertRecord(source, sourceMd5, null, probe, outputMd5, OUTPUT_DUPLICATE,
-                    "复制后的 MD5 已存在，跳过", false, true, false, null, null);
+        if (isOutputDuplicate(source, sourceMd5)) {
+            upsertRecord(source, sourceMd5, null, probe, sourceMd5, OUTPUT_DUPLICATE,
+                    "曲库中已存在相同 MD5，跳过移动", false, true, false, null, null);
             return ScanOutcome.OUTPUT_DUPLICATE;
         }
-        LibraryScanService.IngestResult ingest = scanService.ingestLibraryFile(output, source, sourceMd5, outputMd5, false);
-        upsertRecord(source, sourceMd5, output, probe, outputMd5, COPIED, "已自动复制入 KTV 曲库",
-                false, false, true, ingest.songId(), ingest.songFileId());
+        Path output = moveToTarget(source, targetRoot);
+        LibraryScanService.IngestResult ingest;
+        try {
+            String outputMd5 = hashService.md5(output);
+            if (!Objects.equals(sourceMd5, outputMd5)) {
+                throw new IOException("移动后文件 MD5 校验失败");
+            }
+            ingest = scanService.ingestLibraryFile(output, source, sourceMd5, outputMd5, false);
+            if (!ingest.imported() || ingest.songId() == null || ingest.songFileId() == null) {
+                throw new IOException("移动后的文件未能写入 KTV 曲库");
+            }
+        } catch (Exception e) {
+            restoreMovedFile(output, source);
+            throw e;
+        }
+        markSongFileSourceDeleted(ingest.songFileId());
+        if (existing != null) importRepo.delete(existing);
         return ScanOutcome.COPIED;
     }
 
@@ -573,31 +586,16 @@ public class MediaImportService {
     }
 
     private void removeSourceRecord(MediaImportRecord record) {
-        if (record.getSongFileId() != null) {
-            songFileRepo.findById(record.getSongFileId()).ifPresent(file -> {
-                file.setSourceDeleted(true);
-                songFileRepo.save(file);
-            });
-        }
-        record.setSourceDeleted(true);
-        record.setCleanupStatus("DELETED");
-        record.setCleanupAttemptedAt(OffsetDateTime.now());
-        // Keep the audit row. The delete/save pair also preserves compatibility with
-        // older repository adapters that used delete as their cleanup hook.
+        markSongFileSourceDeleted(record.getSongFileId());
         importRepo.delete(record);
-        importRepo.save(record);
     }
 
-    private void purgeMissingSourceRecords() {
-        Path root = sourceRoot();
-        for (MediaImportRecord record : importRepo.findAllByOrderByCreatedAtDesc()) {
-            Path source = Path.of(record.getSourcePath()).toAbsolutePath().normalize();
-            if (source.startsWith(root) && (record.isSourceDeleted() || !Files.isRegularFile(source))) {
-                record.setCleanupStatus("MISSING");
-                record.setSourceDeleted(true);
-                importRepo.save(record);
-            }
-        }
+    private void markSongFileSourceDeleted(Long songFileId) {
+        if (songFileId == null) return;
+        songFileRepo.findById(songFileId).ifPresent(file -> {
+            file.setSourceDeleted(true);
+            songFileRepo.save(file);
+        });
     }
 
     private boolean isSourceDuplicate(Path source, String sourceMd5) {
@@ -616,44 +614,83 @@ public class MediaImportService {
                 && !record.isSourceDeleted();
     }
 
-    private static boolean matchesStatus(MediaImportRecord record, String status) {
-        if (status == null || status.isBlank()) return true;
-        return switch (status) {
-            case "duplicate" -> record.isDuplicateFlag();
-            case "pending" -> PENDING_TRANSCODE.equals(record.getAction());
-            case "copied" -> COPIED.equals(record.getAction());
-            case "transcoded" -> TRANSCODED.equals(record.getAction());
-            case "unrecognized" -> UNRECOGNIZED.equals(record.getAction());
-            case "failed" -> FAILED.equals(record.getAction());
-            case "deleted" -> record.isSourceDeleted();
-            default -> status.equals(record.getAction());
+    private static SourceLibraryFilters sourceLibraryFilters(String status, String formatAnalysis,
+                                                             Boolean sourceDeleted) {
+        String normalizedStatus = status == null ? "" : status.trim();
+        String action = switch (normalizedStatus) {
+            case "", "duplicate", "deleted" -> null;
+            case "pending" -> PENDING_TRANSCODE;
+            case "copied" -> COPIED;
+            case "transcoded" -> TRANSCODED;
+            case "unrecognized" -> UNRECOGNIZED;
+            case "failed" -> FAILED;
+            default -> normalizedStatus;
         };
+        Boolean duplicateFlag = "duplicate".equals(normalizedStatus) ? Boolean.TRUE : null;
+        Boolean effectiveSourceDeleted = "deleted".equals(normalizedStatus)
+                ? Boolean.TRUE : sourceDeleted == null ? Boolean.FALSE : sourceDeleted;
+        Boolean transcodeRequired = switch (formatAnalysis == null ? "" : formatAnalysis.trim()) {
+            case "transcode" -> Boolean.TRUE;
+            case "copy" -> Boolean.FALSE;
+            default -> null;
+        };
+        return new SourceLibraryFilters(action, duplicateFlag, transcodeRequired, effectiveSourceDeleted);
     }
 
-    private static boolean matchesFormat(MediaImportRecord record, String formatAnalysis) {
-        if (formatAnalysis == null || formatAnalysis.isBlank()) return true;
-        return switch (formatAnalysis) {
-            case "transcode" -> record.isTranscodeRequired();
-            case "copy" -> !record.isTranscodeRequired();
-            default -> true;
-        };
+    private static String normalizeKeyword(String keyword) {
+        return keyword == null ? "" : keyword.trim();
     }
 
-    private boolean requiresTranscode(Path source, MediaProbe probe) {
+    private DirectCopyDecision directCopyDecision(Path source, MediaProbe probe) {
+        return directCopyDecision(extOf(source), probe.videoCodec(), probe.audioCodec(), probe.hasVideo());
+    }
+
+    private DirectCopyDecision directCopyDecision(String container, String videoCodecValue,
+                                                   String audioCodecValue, boolean hasVideo) {
         SettingService.TranscodePolicy policy = settingService.transcodePolicy();
-        String ext = extOf(source);
-        String videoCodec = lower(probe.videoCodec());
-        String audioCodec = lower(probe.audioCodec());
-        if (!probe.hasVideo()) return policy.transcodeAudioOnly();
-        return !policy.directCopyContainers().contains(ext)
-                || !policy.directCopyVideoCodecs().contains(videoCodec)
-                || !policy.directCopyAudioCodecs().contains(audioCodec);
+        if (!hasVideo) {
+            return policy.transcodeAudioOnly()
+                    ? new DirectCopyDecision(true, "已开启纯音频文件转码")
+                    : new DirectCopyDecision(false, "纯音频文件按当前设置直接入库");
+        }
+        String ext = lower(container);
+        String videoCodec = lower(videoCodecValue);
+        String audioCodec = lower(audioCodecValue);
+        List<String> mismatches = new ArrayList<>(3);
+        if (!policy.directCopyContainers().contains(ext)) {
+            mismatches.add(ext.isBlank() ? "未识别容器格式" : "容器 " + ext + " 未加入直拷白名单");
+        }
+        if (!policy.directCopyVideoCodecs().contains(videoCodec)) {
+            mismatches.add(videoCodec.isBlank() ? "未识别视频编码" : "视频编码 " + videoCodec + " 未加入直拷白名单");
+        }
+        if (!policy.directCopyAudioCodecs().contains(audioCodec)) {
+            mismatches.add(audioCodec.isBlank() ? "未识别音频编码" : "音频编码 " + audioCodec + " 未加入直拷白名单");
+        }
+        return mismatches.isEmpty()
+                ? new DirectCopyDecision(false, "容器、视频编码和音频编码均满足直拷条件")
+                : new DirectCopyDecision(true, String.join("；", mismatches));
     }
 
-    private Path copyToTarget(Path source, Path targetRoot) throws IOException {
+    private boolean hasStoredFormatAnalysis(MediaImportRecord record) {
+        if (record.getMediaType() == null || record.getSourceFormat() == null) return false;
+        return MediaClassifier.AUDIO.equals(record.getMediaType())
+                || (record.getVideoCodec() != null && record.getAudioCodec() != null);
+    }
+
+    private record DirectCopyDecision(boolean transcodeRequired, String reason) {}
+
+    private Path moveToTarget(Path source, Path targetRoot) throws IOException {
         Path output = uniqueTarget(targetRoot.resolve(source.getFileName()));
-        Files.copy(source, output, StandardCopyOption.COPY_ATTRIBUTES);
+        Files.move(source, output);
         return output;
+    }
+
+    private void restoreMovedFile(Path output, Path source) {
+        try {
+            if (Files.isRegularFile(output) && !Files.exists(source)) Files.move(output, source);
+        } catch (IOException ignored) {
+            // The original failure remains authoritative; the output is retained for manual recovery.
+        }
     }
 
     private Path transcodeToTarget(Path source, Path targetRoot, MediaProbe probe) {
@@ -722,16 +759,18 @@ public class MediaImportService {
         return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
     }
 
-    private void cleanupImportedRecord(Long recordId) {
+    private boolean cleanupImportedRecord(Long recordId) {
         MediaImportRecord record = importRepo.findById(recordId).orElse(null);
-        if (record == null || !isSafelyImported(record)) return;
+        if (record == null || !isSafelyImported(record)) return false;
         try {
             deleteSourceAndCompanions(record);
-        } catch (IOException e) {
+            return true;
+        } catch (Exception e) {
             record.setCleanupStatus("FAILED");
             record.setCleanupError(messageOf(e));
             record.setCleanupAttemptedAt(OffsetDateTime.now());
             importRepo.save(record);
+            return false;
         }
     }
 

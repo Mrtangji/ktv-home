@@ -78,6 +78,26 @@ class AdminServiceIntegrationTest {
     }
 
     @Test
+    void adminSongListUsesDatabasePaginationAndBatchLoadsFiles() {
+        Song sunny = songRepo.findByFingerprint("fp-晴天").orElseThrow();
+        Song beyond = songRepo.findByFingerprint("fp-海阔天空").orElseThrow();
+        Song later = songRepo.findByFingerprint("fp-后来").orElseThrow();
+        Song unknown = songRepo.findByFingerprint("fp-TRACK_001").orElseThrow();
+        fileRepo.save(adminFile(sunny.getId(), "/music/晴天.mkv", false, "/source-music/晴天.mkv"));
+        fileRepo.save(adminFile(beyond.getId(), "/music/海阔天空.mkv", true, "/source-music/海阔天空.mpg"));
+        fileRepo.save(adminFile(later.getId(), "/music/后来.mp3", false, "/source-music/后来.mp3"));
+        fileRepo.save(adminFile(unknown.getId(), "/music/TRACK_001.mp3", false, null));
+
+        var firstPage = adminService.listAdminSongs("", "", "", 0, 2);
+        assertThat(firstPage.getTotalElements()).isEqualTo(4);
+        assertThat(firstPage.getContent()).hasSize(2);
+        assertThat(firstPage.getContent()).allMatch(song -> song.filePath() != null);
+        assertThat(adminService.listAdminSongs("晴天", "", "", 0, 20).getTotalElements()).isEqualTo(1);
+        assertThat(adminService.listAdminSongs("", "", "TRANSCODED", 0, 20).getTotalElements()).isEqualTo(1);
+        assertThat(adminService.listAdminSongs("", "", "UNKNOWN", 0, 20).getTotalElements()).isEqualTo(1);
+    }
+
+    @Test
     void editRecomputesPinyinAndPromotesUnrecognized() {
         Song track = songRepo.findByFingerprint("fp-TRACK_001").orElseThrow();
         adminService.editSong(track.getId(),
@@ -146,6 +166,14 @@ class AdminServiceIntegrationTest {
         f.setSongId(songId); f.setFilePath(path); f.setFormat("matroska");
         f.setAudioTracks(tracks); f.setVocalTrackIndex(vocalIdx); f.setVocalConfidence(confidence);
         f.setFileMtime(java.time.OffsetDateTime.now());
+        return f;
+    }
+
+    private com.homektv.domain.SongFile adminFile(Long songId, String path, boolean transcode, String sourcePath) {
+        var f = new com.homektv.domain.SongFile();
+        f.setSongId(songId); f.setFilePath(path); f.setFormat("mkv");
+        f.setFileMtime(java.time.OffsetDateTime.now()); f.setTranscodeRequired(transcode);
+        f.setSourcePath(sourcePath);
         return f;
     }
 

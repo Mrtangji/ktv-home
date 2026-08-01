@@ -27,7 +27,8 @@ public record AiSongClassification(
         Double artistConfidence,
         Double languageConfidence,
         Double vocalFormConfidence,
-        java.util.Map<String, String> evidence
+        String artistGender,
+        java.util.Map<String, Object> evidence
 ) {
     /**
      * 紧凑构造函数：对 {@code genres}、{@code themes}、{@code recommendedPlaylists} 做不可变防御性拷贝，
@@ -53,7 +54,7 @@ public record AiSongClassification(
                                 String ageRange, String vocalForm, List<String> recommendedPlaylists,
                                 String reason, Double confidence) {
         this(null, null, language, era, genres, themes, ageRange, vocalForm, recommendedPlaylists,
-                reason, confidence, confidence, confidence, confidence, confidence, java.util.Map.of());
+                reason, confidence, confidence, confidence, confidence, confidence, "未知", java.util.Map.of());
     }
 
     private static double clamp(Double value, Double fallback) {

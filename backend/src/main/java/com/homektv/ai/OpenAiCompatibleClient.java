@@ -1,8 +1,10 @@
 package com.homektv.ai;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.homektv.domain.Song;
 import com.homektv.domain.MediaImportRecord;
 import com.homektv.repo.SongFileRepository;
@@ -24,6 +26,12 @@ import java.util.Map;
 public class OpenAiCompatibleClient {
     private final AiConfigService configService;
     private final ObjectMapper mapper;
+    private final ObjectMapper tolerantMapper = JsonMapper.builder()
+            .enable(JsonReadFeature.ALLOW_JAVA_COMMENTS)
+            .enable(JsonReadFeature.ALLOW_SINGLE_QUOTES)
+            .enable(JsonReadFeature.ALLOW_UNQUOTED_FIELD_NAMES)
+            .enable(JsonReadFeature.ALLOW_TRAILING_COMMA)
+            .build();
     private final RestClient.Builder restClientBuilder;
     private final SongFileRepository fileRepository;
 
@@ -75,11 +83,17 @@ public class OpenAiCompatibleClient {
         try {
             return invokeJson(config, config.modelFor(role), systemPrompt, userPrompt, maxTokens, responseFormat);
         } catch (AiProviderException exception) {
-            if (responseFormat && config.jsonMode() == AiConfigService.JsonMode.AUTO && exception.isCompatibilityFailure()) {
+            if (responseFormat && config.jsonMode() == AiConfigService.JsonMode.AUTO && exception.shouldRetryPromptOnly()) {
                 return invokeJson(config, config.modelFor(role), systemPrompt, userPrompt, maxTokens, false);
             }
             throw exception;
         }
+    }
+
+    public JsonNode completeJsonPromptOnly(String role, String systemPrompt, String userPrompt, int maxTokens) {
+        configService.requireConfigured();
+        AiConfigService.ResolvedConfig config = configService.resolve();
+        return invokeJson(config, config.modelFor(role), systemPrompt, userPrompt, maxTokens, false);
     }
 
     public List<String> listModels() {
@@ -136,13 +150,37 @@ public class OpenAiCompatibleClient {
                 Map.of("role", "user", "content", userPrompt)));
         if (responseFormat) body.put("response_format", Map.of("type", "json_object"));
         JsonNode response = request(config, "POST", "/chat/completions", body);
-        String content = response.path("choices").path(0).path("message").path("content").asText("");
+        JsonNode choice = response.path("choices").path(0);
+        String content = responseContent(choice.path("message"));
+        if (content.isBlank()) content = choice.path("text").asText("");
+        if (content.isBlank()) content = response.path("output_text").asText("");
         if (content.isBlank()) throw new AiProviderException("AI_EMPTY_RESPONSE", "AI 服务未返回内容", null);
         try {
             return mapper.readTree(extractJson(content));
         } catch (JsonProcessingException e) {
-            throw new AiProviderException("AI_JSON_INVALID", "AI 服务返回的内容不是有效 JSON", e);
+            try {
+                return tolerantMapper.readTree(extractJson(content));
+            } catch (JsonProcessingException tolerantFailure) {
+                throw new AiProviderException("AI_JSON_INVALID", "AI 服务返回的内容不是有效 JSON", tolerantFailure);
+            }
         }
+    }
+
+    private String responseContent(JsonNode message) {
+        JsonNode content = message.path("content");
+        if (content.isTextual() && !content.asText().isBlank()) return content.asText();
+        if (content.isArray()) {
+            StringBuilder text = new StringBuilder();
+            for (JsonNode part : content) {
+                String value = part.isTextual() ? part.asText() : part.path("text").asText("");
+                if (!value.isBlank()) text.append(value).append('\n');
+            }
+            return text.toString().trim();
+        }
+        String value = content.asText("");
+        if (!value.isBlank()) return value;
+        JsonNode reasoning = message.path("reasoning_content");
+        return reasoning.isTextual() ? reasoning.asText() : "";
     }
 
     private JsonNode request(AiConfigService.ResolvedConfig config, String method, String path, Object body) {
@@ -182,7 +220,7 @@ public class OpenAiCompatibleClient {
     }
 
     private String extractJson(String content) {
-        String value = content.trim();
+        String value = content.replaceAll("(?is)<think>.*?</think>", "").trim();
         if (value.startsWith("```")) {
             int firstLine = value.indexOf('\n');
             int lastFence = value.lastIndexOf("```");
@@ -191,19 +229,37 @@ public class OpenAiCompatibleClient {
         int objectStart = value.indexOf('{');
         int arrayStart = value.indexOf('[');
         int start = objectStart < 0 ? arrayStart : arrayStart < 0 ? objectStart : Math.min(objectStart, arrayStart);
-        int end = value.startsWith("[", Math.max(0, start)) ? value.lastIndexOf(']') : value.lastIndexOf('}');
-        return start >= 0 && end >= start ? value.substring(start, end + 1) : value;
+        if (start < 0) return value;
+        char open = value.charAt(start);
+        char close = open == '{' ? '}' : ']';
+        int depth = 0;
+        boolean quoted = false;
+        boolean escaped = false;
+        for (int index = start; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (quoted) {
+                if (escaped) escaped = false;
+                else if (current == '\\') escaped = true;
+                else if (current == '"') quoted = false;
+                continue;
+            }
+            if (current == '"') quoted = true;
+            else if (current == open) depth++;
+            else if (current == close && --depth == 0) return value.substring(start, index + 1);
+        }
+        return value.substring(start);
     }
 
     private String classificationSystemPrompt() {
         return """
                 你是家庭 KTV 曲库元数据修复器。只返回 JSON，不要 Markdown。不能确定时使用“未知”，禁止编造。
-                JSON 字段：title, artist, language, era, genres[], themes[], ageRange, vocalForm,
+                JSON 字段：title, artist, artistGender, language, era, genres[], themes[], ageRange, vocalForm,
                 recommendedPlaylists[], reason, confidence, titleConfidence, artistConfidence,
-                languageConfidence, vocalFormConfidence, evidence{}。
+                languageConfidence, vocalFormConfidence, evidence{}。evidence 的值可以是字符串、数组或嵌套对象。
                 language 只能是：国语、粤语、闽南语、英语、日语、韩语、纯音乐、其他、未知。
                 vocalForm 只能是：独唱、对唱、合唱、组合、未知。对唱必须是两位不同主唱；三人以上是合唱，
                 乐队是组合，双音轨不是对唱证据。置信度必须是 0 到 1。保留版本信息但不要把 MV/LIVE/分辨率当歌名。
+                artistGender 只能是：男歌手、女歌手、组合、未知；多人或乐队使用“组合”，证据不足使用“未知”。
                 当前语言若标记为 legacy_default/untrusted 就不是证据。
                 """;
     }
@@ -226,5 +282,8 @@ public class OpenAiCompatibleClient {
         AiProviderException(String code, String message, Throwable cause, Integer status) { super(message, cause); this.code = code; this.status = status; }
         public String getCode() { return code; }
         boolean isCompatibilityFailure() { return status != null && (status == 400 || status == 404 || status == 422); }
+        boolean shouldRetryPromptOnly() {
+            return isCompatibilityFailure() || "AI_JSON_INVALID".equals(code) || "AI_EMPTY_RESPONSE".equals(code);
+        }
     }
 }

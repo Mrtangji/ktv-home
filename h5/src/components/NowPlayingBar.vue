@@ -1,7 +1,7 @@
 <template>
   <!-- 有歌曲正在播放时 / When a song is currently playing -->
   <div v-if="player.nowPlaying" class="now" @click="$router.push({ name: 'lyric' })">
-    <div class="cover"></div>
+    <div class="cover" :style="coverStyle"><Music2 v-if="!coverUrl" :size="20" /></div>
     <div class="grow">
       <div class="title">
         {{ player.nowPlaying.song?.title }}
@@ -25,8 +25,11 @@
  */
 import { computed } from 'vue'
 import { usePlayerStore } from '../stores/player'
+import { Music2 } from 'lucide-vue-next'
 
 const player = usePlayerStore()
+const coverUrl = computed(() => player.nowPlaying?.song?.coverUrl || '')
+const coverStyle = computed(() => coverUrl.value ? { backgroundImage: `url(${coverUrl.value})` } : {})
 
 /**
  * 当前播放进度百分比（0–100）。
@@ -54,9 +57,8 @@ const stateText = computed(() => ({
 .now.empty { border-color: var(--glass-border); justify-content: center; }
 .hint { color: var(--dim2); font-size: 13px; text-align: center; }
 .cover {
-  width:48px;height:48px;border-radius:6px;flex:none;
-  background:linear-gradient(rgba(4,10,12,.18),rgba(4,10,12,.18)),url('../assets/tv-player.png') center / cover;
-  border: 1px solid var(--glass-border);
+  width:48px;height:48px;border-radius:6px;flex:none;display:grid;place-items:center;
+  background:#202630 center / cover no-repeat;color:var(--dim2);border:1px solid var(--glass-border);
 }
 .title { font-size: 14px; font-weight: 700; }
 .artist { color: var(--dim); font-weight: 400; font-size: 12px; }

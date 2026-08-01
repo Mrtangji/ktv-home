@@ -17,7 +17,7 @@
     <!-- 正在演唱卡 -->
     <!-- 正在演唱卡片 / Now playing card -->
     <section class="sec" v-if="player.nowPlaying">
-      <div class="now">
+      <div class="now" :class="{ 'has-cover': nowPlayingCover }" :style="nowPlayingStyle">
         <div class="grow">
           <small>正在演唱</small><div class="t">{{ player.nowPlaying.song?.title }}
             <span class="a">· {{ player.nowPlaying.song?.artist }}</span></div>
@@ -67,7 +67,7 @@
  * Queue view — shows now-playing, upcoming queue, and playback history,
  * with support for boosting, removing, skipping tracks, and host management.
  */
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { usePlayerStore } from '../stores/player'
 import { useUserStore } from '../stores/user'
 import api, { makeControls } from '../api/client'
@@ -84,6 +84,10 @@ const controls = makeControls(user.clientToken)
 const history = ref([])
 const showHist = ref(false)
 const host = ref({ claimed: false, isHost: false, hostNickname: null })
+const nowPlayingCover = computed(() => player.nowPlaying?.song?.coverUrl || '')
+const nowPlayingStyle = computed(() => nowPlayingCover.value ? {
+  backgroundImage: `linear-gradient(90deg,rgba(8,11,14,.94),rgba(8,11,14,.38)),url(${nowPlayingCover.value})`
+} : {})
 
 onMounted(async () => {
   const [loadedHistory, loadedHost] = await Promise.all([api.history().catch(() => []), api.roomHostStatus(user.clientToken).catch(() => null)])
@@ -194,7 +198,7 @@ async function shuffleQueue() {
   padding: 5px 12px; font-size: 11px; color: var(--dim);
 }
 .chip.gold { color: var(--gold); border-color: rgba(240,199,66,.25); }
-.now { min-height:145px;position:relative;overflow:hidden;border-radius:7px;padding:18px;display:flex;align-items:flex-end;background:linear-gradient(90deg,rgba(8,11,14,.92),rgba(8,11,14,.28)),url('../assets/tv-player.png') center / cover; }
+.now { min-height:145px;position:relative;overflow:hidden;border-radius:7px;padding:18px;display:flex;align-items:flex-end;background:linear-gradient(135deg,#222936,#141820);background-position:center;background-size:cover; }
 .now small { color:var(--coral);font-size:9px;font-weight:800; }
 .cover {
   width: 56px; height: 56px; border-radius: 10px; flex: none;

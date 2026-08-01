@@ -66,6 +66,12 @@ public class AiAnalysisTask {
     @Column(name = "updated_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime updatedAt;
 
+    @Transient
+    private String targetTitle;
+
+    @Transient
+    private String targetArtist;
+
     // ---- getters / setters ----
     public Long getId() { return id; }
     public Long getSongId() { return songId; }
@@ -94,4 +100,8 @@ public class AiAnalysisTask {
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
+    public String getTargetTitle() { return targetTitle; }
+    public void setTargetTitle(String targetTitle) { this.targetTitle = targetTitle; }
+    public String getTargetArtist() { return targetArtist; }
+    public void setTargetArtist(String targetArtist) { this.targetArtist = targetArtist; }
 }

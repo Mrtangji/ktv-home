@@ -12,3 +12,4 @@ h5/node_modules
 h5/.vite
 *.log
 .DS_Store
+!dist/tv-apk/*.apk

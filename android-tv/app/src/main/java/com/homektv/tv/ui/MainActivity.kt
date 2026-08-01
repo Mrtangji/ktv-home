@@ -5,8 +5,10 @@ import android.animation.ObjectAnimator
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import android.view.View
@@ -27,11 +29,14 @@ import java.util.concurrent.TimeUnit
 import androidx.appcompat.app.AppCompatActivity
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.lifecycle.lifecycleScope
+import androidx.core.content.FileProvider
+import com.homektv.tv.BuildConfig
 import com.homektv.tv.R
 import com.homektv.tv.databinding.ActivityMainBinding
 import com.homektv.tv.net.AppConfig
 import com.homektv.tv.net.KtvSocket
 import com.homektv.tv.net.MediaApi
+import com.homektv.tv.net.ApkPackageInfo
 import com.homektv.tv.net.QueueSnapshot
 import com.homektv.tv.net.StandbyContent
 import com.homektv.tv.player.PlaybackEngine
@@ -40,6 +45,7 @@ import com.homektv.tv.player.LrcParser
 import com.homektv.tv.player.LyricLine
 import com.homektv.tv.player.MicrophoneMonitor
 import kotlinx.coroutines.launch
+import java.io.File
 
 /**
  * TV 主界面。
@@ -67,6 +73,10 @@ class MainActivity : AppCompatActivity(), KtvSocket.Listener {
     private var effectOverlay: EffectOverlayView? = null
     private var microphoneMonitor: MicrophoneMonitor? = null
     private var microphoneActive = false
+    private var releaseCheckInFlight = false
+    private var checkedReleaseVersion: String? = null
+    private var promptedReleaseVersion: String? = null
+    private var pendingUpdateApk: File? = null
     private val microphonePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { grants ->
@@ -74,6 +84,13 @@ class MainActivity : AppCompatActivity(), KtvSocket.Listener {
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         if (recordGranted) startMicrophoneMonitor()
         else onToast("未授予麦克风权限")
+    }
+    private val unknownSourcesLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        val apk = pendingUpdateApk ?: return@registerForActivityResult
+        if (packageManager.canRequestPackageInstalls()) installDownloadedApk(apk)
+        else onToast("未允许安装此来源的应用")
     }
 
     /** 当前正在播放的 queueId，用于判断快照是否切了歌。 */
@@ -487,6 +504,93 @@ class MainActivity : AppCompatActivity(), KtvSocket.Listener {
         binding.txtStatus.setText(
             if (connected) R.string.status_connected else R.string.status_connecting
         )
+        if (connected) checkForTvUpdate()
+    }
+
+    private fun checkForTvUpdate() {
+        if (releaseCheckInFlight) return
+        releaseCheckInFlight = true
+        lifecycleScope.launch {
+            val release = mediaApi.fetchReleaseInfo()
+            releaseCheckInFlight = false
+            if (release == null || release.version.isBlank() || release.versionCode <= 0) return@launch
+            val releaseKey = "${release.versionCode}:${release.version}"
+            if (checkedReleaseVersion == releaseKey) return@launch
+            checkedReleaseVersion = releaseKey
+            if (release.versionCode == BuildConfig.VERSION_CODE.toLong() || promptedReleaseVersion == releaseKey) return@launch
+
+            val apk = when {
+                Build.SUPPORTED_ABIS.contains("arm64-v8a") -> release.tv.arm64V8a
+                Build.SUPPORTED_ABIS.contains("armeabi-v7a") -> release.tv.armeabiV7a
+                else -> null
+            }
+            if (apk == null || !apk.available || apk.url.isBlank()) {
+                onToast("服务端版本为 ${release.version}，但没有适配本机架构的安装包")
+                return@launch
+            }
+            promptedReleaseVersion = releaseKey
+            showUpdateDialog(release.version, apk)
+        }
+    }
+
+    private fun showUpdateDialog(version: String, apk: ApkPackageInfo) {
+        val size = if (apk.size > 0) " · %.1f MB".format(Locale.US, apk.size / 1024.0 / 1024.0) else ""
+        AlertDialog.Builder(this)
+            .setTitle("发现 Android TV 新版本")
+            .setMessage("当前版本 ${BuildConfig.VERSION_NAME}\n服务端版本 $version\n安装包 ${apk.abi}$size")
+            .setNegativeButton("暂不更新", null)
+            .setPositiveButton("去下载") { _, _ -> downloadAndInstallUpdate(version, apk) }
+            .show()
+    }
+
+    private fun downloadAndInstallUpdate(version: String, apk: ApkPackageInfo) {
+        val progress = AlertDialog.Builder(this)
+            .setTitle("正在下载 $version")
+            .setMessage("安装包下载完成后将打开系统安装界面。")
+            .setCancelable(false)
+            .create()
+        progress.show()
+        lifecycleScope.launch {
+            val destination = File(cacheDir, "updates/home-ktv-tv-${apk.abi}.apk")
+            val downloaded = mediaApi.downloadApk(apk.url, destination, apk.size)
+            progress.dismiss()
+            if (!downloaded) {
+                checkedReleaseVersion = null
+                promptedReleaseVersion = null
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("安装包下载失败")
+                    .setMessage("请检查服务端连接后重试。")
+                    .setNegativeButton("取消", null)
+                    .setPositiveButton("重试") { _, _ -> downloadAndInstallUpdate(version, apk) }
+                    .show()
+                return@launch
+            }
+            pendingUpdateApk = destination
+            requestInstallOrOpen(destination)
+        }
+    }
+
+    private fun requestInstallOrOpen(apk: File) {
+        if (packageManager.canRequestPackageInstalls()) {
+            installDownloadedApk(apk)
+            return
+        }
+        val intent = Intent(
+            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+            Uri.parse("package:$packageName"),
+        )
+        runCatching { unknownSourcesLauncher.launch(intent) }
+            .onFailure { onToast("当前电视无法打开未知来源安装设置") }
+    }
+
+    private fun installDownloadedApk(apk: File) {
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        runCatching { startActivity(intent) }
+            .onFailure { onToast("无法打开系统安装程序") }
     }
 
     private var snapshotReceived = false

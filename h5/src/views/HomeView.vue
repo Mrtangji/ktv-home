@@ -57,7 +57,7 @@ import { useToast } from '../composables/useToast'
 import TabBar from '../components/TabBar.vue'
 import SongRow from '../components/SongRow.vue'
 import NowPlayingBar from '../components/NowPlayingBar.vue'
-import { Search, UserRound, Sparkles, UsersRound, ListMusic, Heart } from 'lucide-vue-next'
+import { Search, UserRound, Sparkles, UsersRound, ListMusic, Heart, Languages, LayoutGrid } from 'lucide-vue-next'
 
 const router = useRouter()
 const user = useUserStore()
@@ -71,6 +71,8 @@ const orderedIds = reactive(new Set())
 /** 首页分类宫格数据 / Home page category grid items */
 const cats = [
   { icon: UserRound, label: '歌手' },
+  { icon: Languages, label: '语种' },
+  { icon: LayoutGrid, label: '分类' },
   { icon: Sparkles, label: '新歌' },
   { icon: UsersRound, label: '对唱' },
   { icon: ListMusic, label: '歌单' },
@@ -127,6 +129,7 @@ async function order(song) {
 function onCat(c) {
   if (c.label === '歌手') router.push({ name: 'browse', query: { tab: 'artists' } })
   else if (c.label === '语种') router.push({ name: 'browse', query: { tab: 'languages' } })
+  else if (c.label === '分类') router.push({ name: 'browse', query: { tab: 'tags' } })
   else if (c.label === '歌单') router.push({ name: 'playlists' })
   else if (c.label === '新歌') router.push({ name: 'artist', params: { name: 'all' }, query: { mode: 'all', sort: 'new' } })
   else if (c.label === '对唱') router.push({ name: 'artist', params: { name: 'all' }, query: { mode: 'vocalForm', value: '对唱' } })
@@ -151,7 +154,7 @@ function onCat(c) {
   padding:0 13px;color:var(--gold);font-size:13px;
 }
 .search .ph { color: var(--dim2); }
-.quick-grid { display:grid;grid-template-columns:repeat(5,1fr);gap:4px; }
+.quick-grid { display:grid;grid-template-columns:repeat(4,1fr);gap:13px 4px; }
 .cat {
   color:var(--dim);padding:2px 0;text-align:center;font-size:11px;transition:var(--transition);
 }

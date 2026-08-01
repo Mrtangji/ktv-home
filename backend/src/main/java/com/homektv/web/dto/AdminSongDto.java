@@ -13,7 +13,13 @@ public record AdminSongDto(
         Long id,
         String title,
         String artist,
+        String album,
+        String releaseDate,
+        String[] aliases,
+        String coverPath,
+        String[] metadataLocks,
         String language,
+        String artistGender,
         String[] tags,
         String mediaType,
         String lyricType,
@@ -33,8 +39,11 @@ public record AdminSongDto(
      * @return 构建好的管理后台歌曲 DTO / the constructed admin song DTO
      */
     public static AdminSongDto from(Song song, SongFile file) {
-        String source = file == null ? "UNKNOWN" : file.isTranscodeRequired() ? "TRANSCODED" : "COPIED";
-        return new AdminSongDto(song.getId(), song.getTitle(), song.getArtist(), song.getLanguage(), song.getTags(),
+        String source = file == null || file.getSourcePath() == null
+                ? "UNKNOWN"
+                : file.isTranscodeRequired() ? "TRANSCODED" : "COPIED";
+        return new AdminSongDto(song.getId(), song.getTitle(), song.getArtist(), song.getAlbum(), song.getReleaseDate(),
+                song.getAliases(), song.getCoverPath(), song.getMetadataLocks(), song.getLanguage(), song.getArtistGender(), song.getTags(),
                 song.getMediaType(), song.getLyricType(), song.getDurationMs(), song.getPlayCount(),
                 file == null ? null : file.getFilePath(), source);
     }

@@ -4,6 +4,7 @@
     <header class="head"><button @click="$router.back()">‹</button><div><h1>{{ pageTitle }}</h1><p>{{ songs.length }} 首歌曲</p></div></header>
     <!-- 排序标签页 / Sort tabs -->
     <div class="sorts"><button :class="{ on: sort === 'hot' }" @click="setSort('hot')">按热度</button><button :class="{ on: sort === 'title' }" @click="setSort('title')">按歌名</button><button :class="{ on: sort === 'new' }" @click="setSort('new')">最新</button></div>
+    <div v-if="mode === 'all'" class="gender-filter"><button v-for="item in genderOptions" :key="item.value" :class="{ on: artistGender === item.value }" @click="setGender(item.value)">{{ item.label }}</button></div>
     <!-- 歌曲列表区域 / Song list area -->
     <main>
       <div v-if="loading" class="tip">加载中…</div><div v-else-if="!songs.length" class="tip">没有找到相关歌曲</div>
@@ -31,7 +32,8 @@ import TabBar from '../components/TabBar.vue'
 import SongRow from '../components/SongRow.vue'
 
 const route = useRoute(), user = useUserStore(), { toast } = useToast(), controls = makeControls(user.clientToken)
-const songs = ref([]), loading = ref(true), sort = ref(route.query.sort || 'hot')
+const songs = ref([]), loading = ref(true), sort = ref(route.query.sort || 'hot'), artistGender = ref(route.query.artistGender || '')
+const genderOptions = [{ value:'', label:'全部歌手' }, { value:'男歌手', label:'男歌手' }, { value:'女歌手', label:'女歌手' }, { value:'组合', label:'组合' }]
 // 已点歌曲 ID 集合，防止重复点歌 / Set of ordered song IDs to prevent duplicate ordering
 const orderedIds = reactive(new Set())
 
@@ -67,6 +69,7 @@ async function load() {
   loading.value = true
   const params = { sort: sort.value, limit: 200 }
   if (mode.value !== 'all') params[mode.value] = value.value
+  if (artistGender.value) params.artistGender = artistGender.value
   try { songs.value = await api.browseSongs(params) } finally { loading.value = false }
 }
 onMounted(load); watch(() => route.fullPath, load)
@@ -77,6 +80,7 @@ onMounted(load); watch(() => route.fullPath, load)
  * @param {'hot' | 'title' | 'new'} value - 排序方式 / sort method
  */
 function setSort(value) { sort.value = value; load() }
+function setGender(value) { artistGender.value = value; load() }
 
 /**
  * 将歌曲加入播放队列。失败时弹出错误提示。
@@ -95,5 +99,5 @@ function fmtDur(ms) { if (!ms) return ''; const value = Math.round(ms / 1000); r
 </script>
 
 <style scoped>
-.page{min-height:100vh;padding-bottom:74px}.head{display:flex;align-items:center;gap:12px;padding:13px 16px 8px}.head button{border:0;background:none;color:var(--text);font-size:30px;width:30px}.head h1{font-size:19px;margin:0}.head p{font-size:11px;color:var(--dim);margin:3px 0 0}.sorts{display:flex;gap:7px;padding:7px 16px 11px}.sorts button{border:1px solid var(--glass-border);background:var(--panel2);color:var(--dim);border-radius:999px;padding:6px 14px}.sorts button.on{background:var(--gold-glow);border-color:rgba(240,199,66,.28);color:var(--gold)}main{padding:0 16px}.tip{text-align:center;color:var(--dim2);padding:45px 10px}
+.page{min-height:100vh;padding-bottom:74px}.head{display:flex;align-items:center;gap:12px;padding:13px 16px 8px}.head button{border:0;background:none;color:var(--text);font-size:30px;width:30px}.head h1{font-size:19px;margin:0}.head p{font-size:11px;color:var(--dim);margin:3px 0 0}.sorts,.gender-filter{display:flex;gap:7px;padding:7px 16px 5px;overflow-x:auto}.gender-filter{padding-top:2px;padding-bottom:8px}.sorts button,.gender-filter button{border:1px solid var(--glass-border);background:var(--panel2);color:var(--dim);border-radius:999px;padding:6px 14px;white-space:nowrap}.sorts button.on,.gender-filter button.on{background:var(--gold-glow);border-color:rgba(240,199,66,.28);color:var(--gold)}main{padding:0 16px}.tip{text-align:center;color:var(--dim2);padding:45px 10px}
 </style>

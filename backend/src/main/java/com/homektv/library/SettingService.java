@@ -58,7 +58,9 @@ public class SettingService {
         Map<String, Object> out = new HashMap<>(TRANSCODE_DEFAULTS);
         out.putAll(GENERAL_DEFAULTS);
         for (Setting s : repo.findAll()) {
-            if (!s.getKey().startsWith("ai.")) out.put(s.getKey(), parse(s.getValue()));
+            if (!s.getKey().startsWith("ai.") && !s.getKey().startsWith("music_sources.")) {
+                out.put(s.getKey(), parse(s.getValue()));
+            }
         }
         return out;
     }

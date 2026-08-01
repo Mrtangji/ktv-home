@@ -12,8 +12,7 @@
     <!-- 筛选面板 / Filter panel -->
     <section class="filter-panel">
       <label><span>关键词</span><input v-model.trim="filters.keyword" placeholder="歌名、歌手或文件名" @keyup.enter="search" /></label>
-      <label><span>处理状态</span><select v-model="filters.status"><option value="">全部状态</option><option value="pending">待转码</option><option value="duplicate">重复</option><option value="copied">已自动直拷</option><option value="transcoded">已转码</option><option value="unrecognized">未识别</option><option value="failed">失败</option></select></label>
-      <label><span>格式分析</span><select v-model="filters.formatAnalysis"><option value="">全部结果</option><option value="transcode">需转码</option><option value="copy">可直拷</option></select></label>
+      <label><span>处理状态</span><span class="select-control"><select v-model="filters.status"><option value="">全部状态</option><option value="pending">待转码</option><option value="duplicate">重复</option><option value="transcoded">已转码</option><option value="unrecognized">未识别</option><option value="failed">失败</option></select><ChevronDown :size="15" aria-hidden="true" /></span></label>
       <div class="filter-actions"><button class="secondary" @click="reset">重置</button><button class="primary" @click="search">查询</button></div>
     </section>
 
@@ -36,7 +35,7 @@
       </div>
       <div class="table-scroll">
         <table>
-          <thead><tr><th><input type="checkbox" aria-label="全选当前页" title="全选当前页" :checked="allSelected" @change="setAll($event.target.checked)" /></th><th>源文件</th><th>识别结果</th><th>格式分析</th><th>重复状态</th><th>入库结果</th><th>MD5</th><th>操作</th></tr></thead>
+          <thead><tr><th><input type="checkbox" aria-label="全选当前页" title="全选当前页" :checked="allSelected" @change="setAll($event.target.checked)" /></th><th>源文件</th><th>识别结果</th><th>格式分析</th><th>重复状态</th><th>入库结果</th><th>MD5</th><th class="action-cell">操作</th></tr></thead>
           <tbody>
             <tr v-for="item in rows" :key="item.id">
               <td><input type="checkbox" :aria-label="`选择 ${item.sourceFilename}`" :disabled="item.sourceDeleted" :checked="selected.includes(item.id)" @change="setSelected(item.id, $event.target.checked)" /></td>
@@ -46,8 +45,7 @@
               <td><span class="status" :class="item.duplicate ? 'amber' : 'neutral'">{{ item.duplicate ? '重复' : '未重复' }}</span><small>{{ item.duplicate ? item.reason : '源/输出 MD5 未命中' }}</small></td>
               <td><span class="status" :class="statusClass(item.displayStatus)">{{ statusText(item.displayStatus) }}</span><small>{{ item.outputPath || item.reason || '—' }}</small></td>
               <td class="md5"><small>源：{{ shortMd5(item.sourceMd5) }}</small><small>输出：{{ shortMd5(item.outputMd5) }}</small></td>
-              <td><div class="row-actions">
-                <button class="link action-button" :disabled="item.sourceDeleted" @click="analyzeImport(item)"><Sparkles :size="14" />AI 识别</button>
+              <td class="action-cell"><div class="row-actions">
                 <button class="link action-button" :disabled="progress.running || !isTranscodable(item)" @click="transcodeOne(item)"><RefreshCw :size="14" />{{ progress.currentRecordId === item.id ? '转码中' : '转码' }}</button>
                 <button class="link priority-text action-button" :disabled="!canPrioritize(item)" @click="prioritize(item)"><ListRestart :size="14" />{{ priorityText(item) }}</button>
                 <button class="link danger-text action-button" :disabled="item.sourceDeleted" @click="deleteOne(item)"><Trash2 :size="14" />删除</button>
@@ -69,16 +67,15 @@
  * Source library management page — manages scanned source materials, duplicate detection, and transcode import tasks.
  */
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { ListRestart, RefreshCw, Sparkles, Trash2 } from 'lucide-vue-next'
+import { ChevronDown, ListRestart, RefreshCw, Trash2 } from 'lucide-vue-next'
 import api from '../../api/client'
 import AdminLayout from './AdminLayout.vue'
 import { alertDialog, confirmDialog } from '../../composables/useDialog'
 
 // 列表数据、分页、选中项 / List data, pagination, selected items
 const rows = ref([]), total = ref(0), page = ref(0), totalPages = ref(1), selected = ref([])
-const router = useRouter()
 const cleaning = ref(false)
+// 默认展示全部源素材；格式筛选目前没有单独的界面控件。
 const filters = reactive({ keyword: '', status: '', formatAnalysis: '' })
 const progress = ref({ running:false, total:0, completed:0 })
 let timer = null
@@ -103,20 +100,6 @@ async function load() { const r = await api.adminSourceLibrary({ ...filters, pag
  * Poll transcode progress; auto-clear timer and refresh list when task ends.
  */
 async function loadProgress() { progress.value = await api.adminSourceTranscodeProgress().catch(()=>progress.value); if (!progress.value.running && timer) { clearInterval(timer); timer=null; await load() } }
-
-async function analyzeImport(item) {
-  try {
-    await api.adminAiCreateImportTask(item.id)
-    await alertDialog('AI 识别任务已创建，可在“AI 曲库”中查看结果。')
-  } catch (error) {
-    if (String(error.message || '').includes('配置')) {
-      await alertDialog('请先在系统设置中配置 AI 模型。')
-      await router.push({ name: 'admin-settings', query: { section: 'ai' } })
-      return
-    }
-    await alertDialog(error.message || 'AI 识别任务创建失败')
-  }
-}
 
 /** 搜索：重置到第一页 / Search: reset to first page */
 function search(){ page.value=0; load() }
@@ -181,7 +164,7 @@ async function cleanupImported(){
     const result=await api.adminCleanupImportedSources()
     selected.value=[]
     await load()
-    await alertDialog(`清理完成：删除 ${result.deleted||0} 个源文件，跳过 ${result.skipped||0} 个，不符合安全条件或无需清理；失败 ${result.failed||0} 个。`,{title:'自动清理完成',tone:result.failed?'warning':'success'})
+    await alertDialog(`清理完成：删除 ${result.deleted||0} 个源文件，跳过 ${result.skipped||0} 个，不符合安全条件或无需清理；失败 ${result.failed||0} 个。请重新扫描原始音乐路径，以同步目录中的最新文件。`,{title:'自动清理完成',tone:result.failed?'warning':'success'})
   } catch(e) { await alertDialog(e.message||'自动清理失败') }
   finally { cleaning.value=false }
 }
@@ -270,7 +253,7 @@ function mediaText(v){return{KTV_VIDEO:'KTV 视频',MV:'MV',AUDIO:'音频'}[v]||
  * @param {string} v - 状态枚举值 / status enum value
  * @returns {string} 中文显示文本 / Chinese display text
  */
-function statusText(v){return{AUTO_COPIED:'已自动直拷',TRANSCODED:'已转码入库',PENDING_TRANSCODE:'待转码',DUPLICATE:'重复跳过',UNRECOGNIZED:'未识别',FAILED:'失败'}[v]||v||'待处理'}
+function statusText(v){return{AUTO_COPIED:'已移动入库',TRANSCODED:'已转码入库',PENDING_TRANSCODE:'待转码',DUPLICATE:'重复跳过',UNRECOGNIZED:'未识别',FAILED:'失败'}[v]||v||'待处理'}
 
 /**
  * 将处理状态枚举映射为 CSS 类名。
@@ -295,6 +278,6 @@ onUnmounted(()=>{if(timer)clearInterval(timer)})
 </script>
 
 <style scoped>
-.page-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}.page-head h1{font-size:22px}.page-head p{color:#64748b;font-size:13px;margin-top:6px}.primary,.secondary,.danger{height:34px;padding:0 14px;border-radius:6px;font-size:13px}.primary{background:#2563eb;color:#fff}.secondary{background:#fff;border:1px solid #cbd5e1;color:#334155}.danger{background:#fff;border:1px solid #fecaca;color:#b91c1c}.primary:disabled,.secondary:disabled,.danger:disabled{opacity:.45;cursor:not-allowed}.filter-panel{display:flex;align-items:flex-end;flex-wrap:wrap;gap:10px;padding:12px 14px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:14px}.filter-panel label{display:flex;flex:0 0 180px;flex-direction:column;gap:5px;color:#475569;font-size:12px}.filter-panel label:first-child{flex-basis:280px}.filter-panel input,.filter-panel select{width:100%;height:34px;border:1px solid #cbd5e1;border-radius:6px;padding:0 10px;background:#fff;color:#172033;font-size:13px;box-shadow:0 1px 2px rgba(15,23,42,.03)}.filter-panel input:focus,.filter-panel select:focus{border-color:#60a5fa;box-shadow:0 0 0 3px rgba(37,99,235,.1);outline:0}.filter-actions{display:flex;align-items:flex-end;gap:8px}.progress-panel,.table-panel{background:#fff;border:1px solid #e2e8f0;border-radius:8px}.progress-panel{padding:16px;margin-bottom:14px;display:grid;grid-template-columns:1fr auto;gap:8px}.progress-copy{display:flex;flex-direction:column;gap:4px}.progress-copy span,.current{font-size:12px;color:#64748b}.progress-value{color:#2563eb;font-weight:700}.track{grid-column:1/-1;height:6px;background:#e2e8f0;border-radius:4px;overflow:hidden}.track i{display:block;height:100%;background:#2563eb}.current{grid-column:1/-1}.toolbar,.pager{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;color:#64748b;font-size:12px}.toolbar{border-bottom:1px solid #e2e8f0}.pager{border-top:1px solid #e2e8f0}.pager div{display:flex;gap:8px}.table-scroll{overflow-x:auto}table{width:100%;border-collapse:collapse}td,th{padding:12px 14px;font-size:12px;text-align:left;border-bottom:1px solid #e2e8f0;white-space:nowrap}td strong{display:block;font-size:13px;color:#172033;max-width:260px;overflow:hidden;text-overflow:ellipsis}td small{display:block;color:#64748b;font-size:11px;margin-top:2px;max-width:200px;overflow:hidden;text-overflow:ellipsis}.md5 small{font-family:ui-monospace,SFMono-Regular,monospace;font-size:11px}.link{background:0 0;border:0;color:#2563eb;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:4px}.link:hover:not(:disabled){background:#eff6ff}.danger-text{color:#b91c1c}.danger-text:hover:not(:disabled){background:#fef2f2}.priority-text{color:#b45309}.priority-text:hover:not(:disabled){background:#fffbeb}.status{display:inline-block;padding:2px 8px;font-size:11px;border-radius:4px;font-weight:600}.status.blue{background:#dbeafe;color:#1d4ed8}.status.green{background:#dcfce7;color:#15803d}.status.amber{background:#fef3c7;color:#a16207}.status.red{background:#fee2e2;color:#b91c1c}.status.neutral{background:#f1f5f9;color:#475569}.empty{text-align:center;padding:48px;color:#94a3b8}.header-actions,.batch-actions,.row-actions,.action-button{display:flex;align-items:center}.header-actions,.batch-actions{gap:8px}.action-button{justify-content:center;gap:5px;white-space:nowrap}.row-actions{gap:12px}.priority-text{color:#b45309}@media(max-width:700px){.page-head{align-items:flex-start;gap:12px}.header-actions,.batch-actions{flex-wrap:wrap;justify-content:flex-end}.toolbar{align-items:flex-start;gap:10px}}
+.page-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}.page-head h1{font-size:22px}.page-head p{color:#64748b;font-size:13px;margin-top:6px}.primary,.secondary,.danger{height:34px;padding:0 14px;border-radius:6px;font-size:13px}.primary{background:#2563eb;color:#fff}.secondary{background:#fff;border:1px solid #cbd5e1;color:#334155}.danger{background:#fff;border:1px solid #fecaca;color:#b91c1c}.primary:disabled,.secondary:disabled,.danger:disabled{opacity:.45;cursor:not-allowed}.filter-panel{display:flex;align-items:flex-end;flex-wrap:wrap;gap:10px;padding:12px 14px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:14px}.filter-panel label{display:flex;flex:0 0 180px;flex-direction:column;gap:5px;color:#475569;font-size:12px}.filter-panel label:first-child{flex-basis:280px}.filter-panel input,.filter-panel select{width:100%;height:36px;border:1px solid #cbd5e1;border-radius:6px;padding:0 10px;background:#fff;color:#172033;font:inherit;font-size:13px;line-height:normal;box-shadow:0 1px 2px rgba(15,23,42,.03)}.filter-panel select{appearance:none;padding-right:34px;cursor:pointer}.select-control{position:relative;display:block}.select-control svg{position:absolute;right:10px;top:50%;color:#64748b;pointer-events:none;transform:translateY(-50%)}.filter-panel input:focus,.filter-panel select:focus{border-color:#60a5fa;box-shadow:0 0 0 3px rgba(37,99,235,.1);outline:0}.filter-actions{display:flex;align-items:flex-end;gap:8px}.filter-actions button{height:36px}.progress-panel,.table-panel{background:#fff;border:1px solid #e2e8f0;border-radius:8px}.progress-panel{padding:16px;margin-bottom:14px;display:grid;grid-template-columns:1fr auto;gap:8px}.progress-copy{display:flex;flex-direction:column;gap:4px}.progress-copy span,.current{font-size:12px;color:#64748b}.progress-value{color:#2563eb;font-weight:700}.track{grid-column:1/-1;height:6px;background:#e2e8f0;border-radius:4px;overflow:hidden}.track i{display:block;height:100%;background:#2563eb}.current{grid-column:1/-1}.toolbar,.pager{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;color:#64748b;font-size:12px}.toolbar{border-bottom:1px solid #e2e8f0}.pager{border-top:1px solid #e2e8f0}.pager div{display:flex;gap:8px}.table-scroll{position:relative;overflow-x:auto}table{width:100%;border-collapse:separate;border-spacing:0}td,th{padding:12px 14px;font-size:12px;text-align:left;border-bottom:1px solid #e2e8f0;white-space:nowrap}td strong{display:block;font-size:13px;color:#172033;max-width:260px;overflow:hidden;text-overflow:ellipsis}td small{display:block;color:#64748b;font-size:11px;margin-top:2px;max-width:200px;overflow:hidden;text-overflow:ellipsis}.md5 small{font-family:ui-monospace,SFMono-Regular,monospace;font-size:11px}.action-cell{position:sticky;right:0;z-index:2;width:228px;min-width:228px;background:#fff;border-left:1px solid #e2e8f0;box-shadow:-10px 0 14px -14px rgba(15,23,42,.55)}thead .action-cell{z-index:3}.link{height:30px;border:1px solid #dbe3ee;background:#fff;color:#2563eb;font-size:11px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:0 8px;border-radius:6px}.link:hover:not(:disabled){border-color:#bfdbfe;background:#eff6ff}.danger-text{color:#b91c1c}.danger-text:hover:not(:disabled){border-color:#fecaca;background:#fef2f2}.priority-text{color:#b45309}.priority-text:hover:not(:disabled){border-color:#fde68a;background:#fffbeb}.status{display:inline-block;padding:2px 8px;font-size:11px;border-radius:4px;font-weight:600}.status.blue{background:#dbeafe;color:#1d4ed8}.status.green{background:#dcfce7;color:#15803d}.status.amber{background:#fef3c7;color:#a16207}.status.red{background:#fee2e2;color:#b91c1c}.status.neutral{background:#f1f5f9;color:#475569}.empty{text-align:center;padding:48px;color:#94a3b8}.header-actions,.batch-actions,.row-actions,.action-button{display:flex;align-items:center}.header-actions,.batch-actions{gap:8px}.action-button{justify-content:center;gap:5px;white-space:nowrap}.row-actions{gap:6px}.priority-text{color:#b45309}@media(max-width:700px){.page-head{align-items:flex-start;gap:12px}.header-actions,.batch-actions{flex-wrap:wrap;justify-content:flex-end}.toolbar{align-items:flex-start;gap:10px}.action-cell{width:220px;min-width:220px}.row-actions{gap:4px}.link{padding-inline:6px}}
 .cleanup-button{background:#dc2626;border-color:#dc2626;color:#fff;font-weight:700;box-shadow:0 3px 10px rgba(185,28,28,.28)}.cleanup-button:hover:not(:disabled){background:#b91c1c;border-color:#b91c1c;box-shadow:0 4px 14px rgba(185,28,28,.36)}.cleanup-button:focus-visible{outline:3px solid rgba(248,113,113,.35);outline-offset:2px}
 </style>

@@ -32,6 +32,7 @@ import java.util.*;
 @Service
 public class AiLibraryService {
     private static final List<String> ACTIVE_STATUSES = List.of("pending", "processing", "review");
+    public static final int MAX_PLAYLIST_SONGS = 100;
 
     private final AiAnalysisTaskRepository taskRepository;
     private final SongRepository songRepository;
@@ -72,7 +73,6 @@ public class AiLibraryService {
      * @return 创建的 AI 分析任务 / the created AI analysis task
      */
     public AiAnalysisTask createTask(Long songId) {
-        requireAiConfigured();
         songRepository.findById(songId).orElseThrow(() -> new ApiException("SONG_NOT_FOUND", "歌曲不存在"));
         if (taskRepository.existsBySongIdAndStatusIn(songId, ACTIVE_STATUSES)) {
             throw new ApiException("AI_TASK_EXISTS", "该歌曲已有待处理的 AI 任务");
@@ -80,8 +80,8 @@ public class AiLibraryService {
         AiAnalysisTask task = new AiAnalysisTask();
         task.setSongId(songId);
         AiConfigService.ResolvedConfig config = configService.resolve();
-        task.setModel(config.bulkModel());
-        task.setModelRole("BULK");
+        task.setModel(configService.isConfigured() ? config.bulkModel() : "LOCAL");
+        task.setModelRole(configService.isConfigured() ? "BULK" : "LOCAL");
         task.setTargetType("SONG");
         task.setTargetId(songId);
         try {
@@ -97,7 +97,6 @@ public class AiLibraryService {
     }
 
     public AiAnalysisTask createImportTask(Long recordId) {
-        requireAiConfigured();
         importRecordRepository.findById(recordId)
                 .orElseThrow(() -> new ApiException("IMPORT_RECORD_NOT_FOUND", "导入记录不存在"));
         if (taskRepository.existsByTargetTypeAndTargetIdAndStatusIn("IMPORT_RECORD", recordId, ACTIVE_STATUSES))
@@ -107,8 +106,8 @@ public class AiLibraryService {
         task.setTargetType("IMPORT_RECORD");
         task.setTargetId(recordId);
         task.setSongId(null);
-        task.setModel(config.bulkModel());
-        task.setModelRole("BULK");
+        task.setModel(configService.isConfigured() ? config.bulkModel() : "LOCAL");
+        task.setModelRole(configService.isConfigured() ? "BULK" : "LOCAL");
         task = taskRepository.saveAndFlush(task);
         worker.analyze(task.getId());
         return task;
@@ -136,7 +135,6 @@ public class AiLibraryService {
 
     /** Create a repair batch for every existing song, including already analyzed songs. */
     public Map<String, Object> createRepairBatch() {
-        configService.requireConfigured();
         String batchId = UUID.randomUUID().toString();
         AiConfigService.ResolvedConfig config = configService.resolve();
         int created = 0;
@@ -146,8 +144,8 @@ public class AiLibraryService {
             task.setTargetId(song.getId());
             task.setTargetType("SONG");
             task.setBatchId(batchId);
-            task.setModel(config.bulkModel());
-            task.setModelRole("BULK");
+            task.setModel(configService.isConfigured() ? config.bulkModel() : "LOCAL");
+            task.setModelRole(configService.isConfigured() ? "BULK" : "LOCAL");
             taskRepository.saveAndFlush(task);
             worker.analyze(task.getId());
             created++;
@@ -172,7 +170,6 @@ public class AiLibraryService {
 
     @Transactional
     public Map<String, Object> resumeRepairBatch(String batchId) {
-        configService.requireConfigured();
         List<AiAnalysisTask> tasks = taskRepository.findByBatchIdOrderByCreatedAtAsc(batchId);
         if (tasks.isEmpty()) throw new ApiException("AI_BATCH_NOT_FOUND", "修复批次不存在");
         int resumed = 0;
@@ -189,7 +186,6 @@ public class AiLibraryService {
 
     @Transactional
     public Map<String, Object> retryFailedRepairBatch(String batchId) {
-        configService.requireConfigured();
         List<AiAnalysisTask> tasks = taskRepository.findByBatchIdOrderByCreatedAtAsc(batchId);
         if (tasks.isEmpty()) throw new ApiException("AI_BATCH_NOT_FOUND", "修复批次不存在");
         int retried = 0;
@@ -217,49 +213,173 @@ public class AiLibraryService {
 
     /** Preview an AI-curated playlist. No playlist or playlist-song rows are written here. */
     public Map<String, Object> previewPlaylist(String instruction, int limit) {
-        configService.requireConfigured();
+        try {
+            configService.requireConfigured();
+        } catch (ApiException missingConfiguration) {
+            throw new ApiException("AI_PLAYLIST_REQUIRES_MODEL", "自然语言主题歌单没有可靠的本地替代方案，请先配置 AI 模型");
+        }
         if (instruction == null || instruction.isBlank()) throw new ApiException("INVALID_ARGUMENT", "请描述想要的歌单");
-        int maximum = Math.max(1, Math.min(limit, 500));
+        int maximum = playlistLimit(limit);
         List<Song> all = songRepository.findAll();
         List<Song> candidates = all.size() > 5000 ? all.stream()
                 .sorted(Comparator.comparingInt(Song::getPlayCount).reversed()
                         .thenComparing(s -> s.getAiAnalyzedAt() == null)).limit(5000).toList() : all;
-        StringBuilder candidateJson = new StringBuilder("[");
-        for (Song song : candidates) {
-            if (candidateJson.length() > 1) candidateJson.append(',');
-            candidateJson.append("{\"id\":").append(song.getId()).append(",\"title\":")
-                    .append(json(song.getTitle())).append(",\"artist\":").append(json(song.getArtist()))
-                    .append(",\"language\":").append(json(song.getLanguage())).append(",\"tags\":")
-                    .append(json(String.join("、", song.getTags()))).append("}");
-        }
-        candidateJson.append(']');
-        JsonNode intent = aiClient.completeJson("BULK",
+        if (candidates.isEmpty()) throw new ApiException("PLAYLIST_CANDIDATES_EMPTY", "KTV 曲库中没有可用于生成歌单的歌曲");
+        int selectionMaximum = Math.min(maximum, candidates.size());
+        List<Map<String, Object>> candidateValues = candidates.stream().map(this::playlistCandidate).toList();
+        String candidateJson = json(candidateValues);
+        long metadataEnrichedCount = candidateValues.stream()
+                .filter(value -> Boolean.TRUE.equals(value.get("metadataScraped"))).count();
+        JsonNode intent = aiClient.completeJsonPromptOnly("BULK",
                 "你是家庭 KTV 歌单需求分析器。只返回 JSON，不要 Markdown。输出 intent（自然语言策划意图）、languages(string[]), genres(string[]), themes(string[]), eras(string[]), artists(string[]), mood(string), diversity(string), maxSongs(number)。不要选择歌曲，不要编造歌曲 ID。",
-                "用户策划要求：" + instruction + "\n最多歌曲：" + maximum, 900);
-        String selectionPrompt = "策划意图：" + intent + "\n最多选择 " + maximum
-                + " 首。只能从候选中返回 ID，按播放顺序排列；候选外、重复或无效 ID 都不要返回。候选：" + candidateJson;
-        String selectionRole = configService.resolve().reasoningModel().isBlank() ? "BULK" : "REASONING";
-        JsonNodeResult result = new JsonNodeResult(aiClient.completeJson(selectionRole,
-                "你是家庭 KTV 歌单策划器。根据结构化策划意图从候选曲库中选歌。只返回 JSON：name(string), description(string), songIds(number[]), reasons(string[]), confidence(number)。songIds 只能来自候选，去重，不超过上限。",
-                selectionPrompt, 2600));
-        Set<Long> allowed = candidates.stream().map(Song::getId).collect(java.util.stream.Collectors.toSet());
-        List<Long> ids = new ArrayList<>();
-        for (var node : result.node().path("songIds")) {
-            long id = node.asLong(-1);
-            if (allowed.contains(id) && !ids.contains(id) && ids.size() < maximum) ids.add(id);
+                "用户策划要求：" + instruction + "\n歌单歌曲上限：" + selectionMaximum
+                        + "。这是上限，不要求凑满，可以生成更少歌曲。", 900);
+        String selectionPrompt = "策划意图：" + intent + "\n最多选择 " + selectionMaximum
+                + " 首。这是数量上限，不是必须达到的数量；只选真正符合要求的歌曲，可以少于上限。"
+                + "metadataScraped=true 表示专辑、发行时间、别名等字段已经过外部平台刮削或人工复核，"
+                + "metadataSources 表示各字段的可信来源，应优先作为选曲依据。只能从候选中返回 ID，按播放顺序排列；"
+                + "候选外、重复或无效 ID 都不要返回。候选：" + candidateJson;
+        String selectionSystemPrompt =
+                "你是家庭 KTV 歌单策划器。根据结构化策划意图以及候选歌曲的可信刮削元数据选歌。"
+                        + "优先使用 metadataSources 标记的可信字段，并结合专辑、发行时间、别名、时长、语种、演唱形式、曲风和主题判断；"
+                        + "缺失字段只能谨慎推断。只返回紧凑 JSON：name(string), description(string), songIds(number[]), confidence(number)。"
+                        + "不要输出逐首理由。songIds 只能来自候选，去重，不超过上限；不要求凑满上限。";
+        String reasoningModel = configService.resolve().reasoningModel();
+        boolean reasoningUsed = false;
+        JsonNode selection;
+        try {
+            selection = aiClient.completeJsonPromptOnly("BULK", selectionSystemPrompt, selectionPrompt, 3200);
+        } catch (OpenAiCompatibleClient.AiProviderException failure) {
+            if (reasoningModel == null || reasoningModel.isBlank()
+                    || !Set.of("AI_JSON_INVALID", "AI_EMPTY_RESPONSE").contains(failure.getCode())) throw failure;
+            selection = aiClient.completeJsonPromptOnly("REASONING", selectionSystemPrompt, selectionPrompt, 6000);
+            reasoningUsed = true;
         }
-        return Map.of("name", result.node().path("name").asText("AI 歌单"),
-                "description", result.node().path("description").asText(""), "songIds", ids,
-                "reasons", result.node().path("reasons"), "intent", intent,
-                "candidateCount", candidates.size());
+        JsonNode playlistResult = playlistResult(selection);
+        if (!reasoningUsed && !hasPlaylistSelection(playlistResult) && reasoningModel != null && !reasoningModel.isBlank()) {
+            selection = aiClient.completeJsonPromptOnly("REASONING", selectionSystemPrompt, selectionPrompt, 6000);
+            playlistResult = playlistResult(selection);
+        }
+        Set<Long> allowed = candidates.stream().map(Song::getId).collect(java.util.stream.Collectors.toSet());
+        List<Long> ids = playlistSongIds(playlistResult, allowed, selectionMaximum);
+        Map<Long, Song> songsById = candidates.stream().collect(java.util.stream.Collectors.toMap(Song::getId, song -> song));
+        List<Map<String, Object>> selectedSongs = ids.stream().map(songsById::get).filter(Objects::nonNull)
+                .map(song -> Map.<String, Object>of("id", song.getId(), "title", song.getTitle(), "artist", song.getArtist()))
+                .toList();
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("name", firstText(playlistResult, "name", "playlistName", "title", "AI 歌单"));
+        response.put("description", firstText(playlistResult, "description", "summary", "reason", ""));
+        response.put("songIds", ids);
+        response.put("songs", selectedSongs);
+        response.put("reasons", firstNode(playlistResult, "reasons", "selectionReasons"));
+        response.put("intent", intent);
+        response.put("limit", maximum);
+        response.put("selectedCount", ids.size());
+        response.put("candidateCount", candidates.size());
+        response.put("metadataEnrichedCount", metadataEnrichedCount);
+        return response;
     }
 
-    private String json(String value) {
+    private int playlistLimit(int requested) {
+        return Math.max(1, Math.min(requested, MAX_PLAYLIST_SONGS));
+    }
+
+    JsonNode playlistResult(JsonNode result) {
+        if (result == null || result.isMissingNode() || result.isNull()) return objectMapper.createObjectNode();
+        for (String key : List.of("playlist", "result", "data")) {
+            JsonNode nested = result.path(key);
+            if (nested.isObject() && hasPlaylistSelection(nested)) return nested;
+        }
+        return result;
+    }
+
+    List<Long> playlistSongIds(JsonNode result, Set<Long> allowed, int maximum) {
+        JsonNode values = firstNode(result, "songIds", "selectedSongIds", "ids", "songs", "selectedSongs", "tracks");
+        List<Long> ids = new ArrayList<>();
+        if (!values.isArray()) return ids;
+        for (JsonNode value : values) {
+            long id = value.isObject() ? firstLong(value, "id", "songId", "song_id") : value.asLong(-1);
+            if (allowed.contains(id) && !ids.contains(id) && ids.size() < maximum) ids.add(id);
+        }
+        return ids;
+    }
+
+    private boolean hasPlaylistSelection(JsonNode node) {
+        return List.of("songIds", "selectedSongIds", "ids", "songs", "selectedSongs", "tracks")
+                .stream().anyMatch(node::has);
+    }
+
+    private JsonNode firstNode(JsonNode node, String... keys) {
+        if (node != null) for (String key : keys) if (node.has(key) && !node.path(key).isNull()) return node.path(key);
+        return objectMapper.createArrayNode();
+    }
+
+    private long firstLong(JsonNode node, String... keys) {
+        for (String key : keys) if (node.has(key)) return node.path(key).asLong(-1);
+        return -1;
+    }
+
+    private String firstText(JsonNode node, String first, String second, String third, String fallback) {
+        for (String key : List.of(first, second, third)) {
+            String value = node.path(key).asText("").strip();
+            if (!value.isBlank()) return value;
+        }
+        return fallback;
+    }
+
+    Map<String, Object> playlistCandidate(Song song) {
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("id", song.getId());
+        value.put("title", Objects.toString(song.getTitle(), ""));
+        value.put("artist", Objects.toString(song.getArtist(), ""));
+        putText(value, "language", song.getLanguage(), "未知");
+        putText(value, "vocalForm", song.getVocalForm(), "未知");
+        putText(value, "album", song.getAlbum(), null);
+        putText(value, "releaseDate", song.getReleaseDate(), null);
+        putValues(value, "aliases", song.getAliases());
+        putValues(value, "tags", song.getTags());
+        putValues(value, "genres", song.getAiGenres());
+        putValues(value, "themes", song.getAiThemes());
+        putText(value, "era", song.getAiEra(), null);
+        if (song.getDurationMs() > 0) value.put("durationSeconds", Math.round(song.getDurationMs() / 1000.0));
+        Map<String, String> sources = trustedMetadataSources(song.getMetadataProvenance());
+        value.put("metadataScraped", !sources.isEmpty());
+        if (!sources.isEmpty()) value.put("metadataSources", sources);
+        return value;
+    }
+
+    private Map<String, String> trustedMetadataSources(String provenanceJson) {
+        if (provenanceJson == null || provenanceJson.isBlank()) return Map.of();
+        try {
+            JsonNode provenance = objectMapper.readTree(provenanceJson);
+            Map<String, String> sources = new LinkedHashMap<>();
+            provenance.fields().forEachRemaining(field -> {
+                JsonNode evidence = field.getValue();
+                String source = evidence.path("source").asText("").strip();
+                if (evidence.path("trusted").asBoolean(false) && !source.isBlank()) sources.put(field.getKey(), source);
+            });
+            return sources;
+        } catch (JsonProcessingException ignored) {
+            return Map.of();
+        }
+    }
+
+    private void putText(Map<String, Object> target, String key, String value, String ignoredValue) {
+        if (value == null || value.isBlank() || Objects.equals(value, ignoredValue)) return;
+        target.put(key, value);
+    }
+
+    private void putValues(Map<String, Object> target, String key, String[] values) {
+        if (values == null) return;
+        List<String> present = Arrays.stream(values).filter(Objects::nonNull).map(String::strip)
+                .filter(value -> !value.isBlank()).distinct().toList();
+        if (!present.isEmpty()) target.put(key, present);
+    }
+
+    private String json(Object value) {
         try { return objectMapper.writeValueAsString(value == null ? "" : value); }
         catch (JsonProcessingException e) { return "\"\""; }
     }
-
-    private record JsonNodeResult(com.fasterxml.jackson.databind.JsonNode node) { }
 
     /**
      * 列出最近的 AI 分析任务（最新 100 条）。
@@ -269,7 +389,36 @@ public class AiLibraryService {
      * @return AI 分析任务列表 / list of AI analysis tasks
      */
     public List<AiAnalysisTask> listTasks() {
-        return taskRepository.findTop100ByOrderByCreatedAtDesc();
+        List<AiAnalysisTask> tasks = taskRepository.findTop100ByOrderByCreatedAtDesc();
+        Map<Long, Song> songs = new HashMap<>();
+        songRepository.findAllById(tasks.stream().map(AiAnalysisTask::getSongId).filter(Objects::nonNull).toList())
+                .forEach(song -> songs.put(song.getId(), song));
+        Map<Long, MediaImportRecord> imports = new HashMap<>();
+        importRecordRepository.findAllById(tasks.stream()
+                        .filter(task -> "IMPORT_RECORD".equals(task.getTargetType()))
+                        .map(AiAnalysisTask::getTargetId).filter(Objects::nonNull).toList())
+                .forEach(record -> imports.put(record.getId(), record));
+        tasks.forEach(task -> {
+            if ("IMPORT_RECORD".equals(task.getTargetType())) {
+                MediaImportRecord record = imports.get(task.getTargetId());
+                if (record != null) {
+                    task.setTargetTitle(firstNonBlank(record.getParsedTitle(), record.getSourceFilename(), "导入记录"));
+                    task.setTargetArtist(firstNonBlank(record.getParsedArtist(), "待识别歌手"));
+                }
+            } else {
+                Song song = songs.get(task.getSongId());
+                if (song != null) {
+                    task.setTargetTitle(firstNonBlank(song.getTitle(), "未命名歌曲"));
+                    task.setTargetArtist(firstNonBlank(song.getArtist(), "未知歌手"));
+                }
+            }
+        });
+        return tasks;
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) if (value != null && !value.isBlank()) return value;
+        return "";
     }
 
     /**
@@ -383,6 +532,9 @@ public class AiLibraryService {
         playlistSongRepository.lockPlaylist(playlistId);
         List<PlaylistSong> current = playlistSongRepository.findByPlaylistIdOrderBySortOrder(playlistId);
         if (current.stream().anyMatch(item -> item.getSongId().equals(songId))) return playlistDetail(playlistId);
+        if (current.size() >= MAX_PLAYLIST_SONGS) {
+            throw new ApiException("PLAYLIST_SONG_LIMIT", "每个歌单最多包含 " + MAX_PLAYLIST_SONGS + " 首歌曲");
+        }
         int sortOrder = current.stream().mapToInt(PlaylistSong::getSortOrder).max().orElse(-1) + 1;
         playlistSongRepository.insertManualIfAbsent(playlistId, song.getId(), sortOrder);
         return playlistDetail(playlistId);
@@ -467,7 +619,6 @@ public class AiLibraryService {
      * @return 重置后的任务 / the reset task
      */
     public AiAnalysisTask retry(Long taskId) {
-        requireAiConfigured();
         AiAnalysisTask task = requireTask(taskId);
         if ("pending".equals(task.getStatus()) || "processing".equals(task.getStatus())) {
             throw new ApiException("INVALID_AI_TASK", "任务正在处理中，不能重复分析");
@@ -534,7 +685,7 @@ public class AiLibraryService {
         playlist.setTheme(tag.trim());
         playlist.setDescription("由 AI 标签「" + tag.trim() + "」自动生成");
         playlist.setAiGenerated(true);
-        playlist.setAiRule(write(Map.of("tag", tag.trim(), "limit", Math.max(1, Math.min(limit, 500)))));
+        playlist.setAiRule(write(Map.of("tag", tag.trim(), "limit", playlistLimit(limit))));
         playlist = playlistRepository.save(playlist);
 
         playlistSongRepository.deleteByPlaylistIdAndManualFalse(playlist.getId());
@@ -544,7 +695,7 @@ public class AiLibraryService {
             existing.add(item.getSongId());
             order = Math.max(order, item.getSortOrder() + 1);
         }
-        int maximum = Math.max(1, Math.min(limit, 500));
+        int maximum = playlistLimit(limit);
         for (Song song : songRepository.findAll()) {
             if (existing.size() >= maximum) break;
             if (!matches(song, tag) || existing.contains(song.getId())) continue;
@@ -579,10 +730,6 @@ public class AiLibraryService {
     private AiAnalysisTask requireTask(Long id) { return taskRepository.findById(id).orElseThrow(() -> new ApiException("AI_TASK_NOT_FOUND", "AI 任务不存在")); }
     // 查找歌单，不存在则抛异常 / Find playlist by ID or throw
     private Playlist requirePlaylist(Long id) { return playlistRepository.findById(id).orElseThrow(() -> new ApiException("PLAYLIST_NOT_FOUND", "歌单不存在")); }
-    // 校验 AI 配置是否已启用且 API Key 已设置 / Verify AI is enabled and API key is configured
-    private void requireAiConfigured() {
-        configService.requireConfigured();
-    }
     // 将 JSON 字符串解析为分类结果对象 / Parse JSON string to classification object
     private AiSongClassification parse(String json) {
         try { return objectMapper.readValue(json, AiSongClassification.class); }

@@ -68,6 +68,11 @@ public class PlaylistController {
         return service.orderAll(id, request.clientToken());
     }
 
+    @PostMapping("/{id}/songs")
+    public Map<String, Object> addSong(@PathVariable Long id, @RequestBody AddSongRequest request) {
+        return service.addSong(id, request.songId());
+    }
+
     /**
      * 获取指定歌单的封面图片。
      *
@@ -93,4 +98,5 @@ public class PlaylistController {
     }
 
     public record OrderPlaylistRequest(String clientToken) {}
+    public record AddSongRequest(Long songId) {}
 }

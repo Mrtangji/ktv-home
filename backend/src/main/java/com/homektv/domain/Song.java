@@ -53,6 +53,9 @@ public class Song {
     @Column(name = "vocal_form", nullable = false)
     private String vocalForm = "未知";
 
+    @Column(name = "artist_gender", nullable = false)
+    private String artistGender = "未知";
+
     @JdbcTypeCode(SqlTypes.ARRAY)
     @Column(name = "metadata_locks", columnDefinition = "text[]", nullable = false)
     private String[] metadataLocks = new String[0];
@@ -84,6 +87,16 @@ public class Song {
     /** 封面图片路径。 / Cover image path. */
     @Column(name = "cover_path")
     private String coverPath;
+
+    @Column(name = "album")
+    private String album;
+
+    @Column(name = "release_date")
+    private String releaseDate;
+
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "aliases", columnDefinition = "text[]", nullable = false)
+    private String[] aliases = new String[0];
 
     /** 歌词文件路径。 / Lyric file path. */
     @Column(name = "lyric_path")
@@ -164,6 +177,8 @@ public class Song {
     public void setLanguage(String language) { this.language = language; }
     public String getVocalForm() { return vocalForm; }
     public void setVocalForm(String vocalForm) { this.vocalForm = vocalForm; }
+    public String getArtistGender() { return artistGender; }
+    public void setArtistGender(String artistGender) { this.artistGender = artistGender; }
     public String[] getMetadataLocks() { return metadataLocks; }
     public void setMetadataLocks(String[] metadataLocks) { this.metadataLocks = metadataLocks == null ? new String[0] : metadataLocks; }
     public String getMetadataProvenance() { return metadataProvenance; }
@@ -188,6 +203,12 @@ public class Song {
     public void setDurationMs(int durationMs) { this.durationMs = durationMs; }
     public String getCoverPath() { return coverPath; }
     public void setCoverPath(String coverPath) { this.coverPath = coverPath; }
+    public String getAlbum() { return album; }
+    public void setAlbum(String album) { this.album = album; }
+    public String getReleaseDate() { return releaseDate; }
+    public void setReleaseDate(String releaseDate) { this.releaseDate = releaseDate; }
+    public String[] getAliases() { return aliases; }
+    public void setAliases(String[] aliases) { this.aliases = aliases == null ? new String[0] : aliases; }
     public String getLyricPath() { return lyricPath; }
     public void setLyricPath(String lyricPath) { this.lyricPath = lyricPath; }
     public String getLyricType() { return lyricType; }

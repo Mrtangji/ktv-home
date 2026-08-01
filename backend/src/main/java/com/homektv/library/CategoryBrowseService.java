@@ -26,6 +26,7 @@ public class CategoryBrowseService {
                 .map(entry -> Map.<String, Object>of(
                         "name", entry.getKey(),
                         "initial", artistInitial(entry.getValue().get(0)),
+                        "gender", dominantArtistGender(entry.getValue()),
                         "songCount", entry.getValue().size()))
                 .toList();
     }
@@ -51,7 +52,7 @@ public class CategoryBrowseService {
                 .toList();
     }
 
-    public List<SongDto> songs(String artist, String language, String tag, String vocalForm, String sort, int limit) {
+    public List<SongDto> songs(String artist, String artistGender, String language, String tag, String vocalForm, String sort, int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 200));
         Comparator<Song> comparator = "title".equalsIgnoreCase(sort)
                 ? Comparator.comparing(Song::getTitle, String.CASE_INSENSITIVE_ORDER)
@@ -60,6 +61,7 @@ public class CategoryBrowseService {
                     : Comparator.comparingInt(Song::getPlayCount).reversed().thenComparing(Song::getTitle);
         return validSongs().stream()
                 .filter(song -> blank(artist) || song.getArtist().equalsIgnoreCase(artist))
+                .filter(song -> blank(artistGender) || artistGender.equalsIgnoreCase(song.getArtistGender()))
                 .filter(song -> blank(language) || song.getLanguage().equalsIgnoreCase(language))
                 .filter(song -> blank(vocalForm) || vocalForm.equalsIgnoreCase(song.getAiVocalForm()))
                 .filter(song -> blank(tag) || contains(song.getTags(), tag) || contains(song.getAiGenres(), tag) || contains(song.getAiThemes(), tag))
@@ -82,6 +84,13 @@ public class CategoryBrowseService {
 
     private String artistInitial(Song song) {
         return song.getArtistInit() == null || song.getArtistInit().isBlank() ? "#" : song.getArtistInit().substring(0, 1).toUpperCase();
+    }
+
+    static String dominantArtistGender(List<Song> songs) {
+        return songs.stream().map(Song::getArtistGender)
+                .filter(value -> value != null && !value.isBlank() && !"未知".equals(value))
+                .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()))
+                .entrySet().stream().max(Map.Entry.comparingByValue()).map(Map.Entry::getKey).orElse("未知");
     }
 
     private boolean contains(String[] values, String expected) {

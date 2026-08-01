@@ -27,6 +27,37 @@ data class LibraryStatus(
 )
 
 @Serializable
+data class ReleaseAnnouncement(
+    val enabled: Boolean = false,
+    val id: String = "",
+    val title: String = "",
+    val message: String = "",
+)
+
+@Serializable
+data class ApkPackageInfo(
+    val abi: String = "",
+    val available: Boolean = false,
+    val url: String = "",
+    val fileName: String = "",
+    val size: Long = 0,
+)
+
+@Serializable
+data class TvPackages(
+    val armeabiV7a: ApkPackageInfo = ApkPackageInfo(),
+    val arm64V8a: ApkPackageInfo = ApkPackageInfo(),
+)
+
+@Serializable
+data class ReleaseInfo(
+    val version: String = "",
+    val versionCode: Long = 0,
+    val announcement: ReleaseAnnouncement = ReleaseAnnouncement(),
+    val tv: TvPackages = TvPackages(),
+)
+
+@Serializable
 data class StandbyContent(
     val welcomeText: String = "今晚开唱",
     val subtitle: String = "手机点歌，电视欢唱\n一家人的客厅 KTV",

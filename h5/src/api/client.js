@@ -39,6 +39,7 @@ async function request(path, options = {}) {
 
 export const api = {
   health: () => request('/health'),
+  releaseInfo: () => request('/release'),
 
   // 搜索/曲库（P1.6/P1.7）
   // Search / song library (P1.6/P1.7)
@@ -69,6 +70,7 @@ export const api = {
   removeFavorite: (songId, clientToken) => request(`/favorites/${songId}?clientToken=${encodeURIComponent(clientToken || '')}`, { method: 'DELETE' }),
   playlists: () => request('/playlists'),
   playlistDetail: (id) => request(`/playlists/${id}`),
+  addSongToPlaylist: (id, songId) => request(`/playlists/${id}/songs`, { method: 'POST', body: JSON.stringify({ songId }) }),
   orderPlaylist: (id, clientToken) => request(`/playlists/${id}/order`, { method: 'POST', body: JSON.stringify({ clientToken }) }),
   browseArtists: () => request('/browse/artists'),
   browseLanguages: () => request('/browse/languages'),
@@ -88,6 +90,7 @@ export const api = {
   adminSongs: (params = {}) => request('/admin/songs?' + new URLSearchParams(
     Object.entries(params).filter(([, value]) => value !== '' && value != null)
   ).toString()),
+  adminSong: (id) => request(`/admin/songs/${id}`),
   adminEditSong: (id, body) => request(`/admin/songs/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   adminDeleteSong: (id) => request(`/admin/songs/${id}`, { method: 'DELETE' }),
   adminDeleteSongs: (ids) => request('/admin/songs', { method: 'DELETE', body: JSON.stringify({ ids }) }),
@@ -114,6 +117,26 @@ export const api = {
   adminTranscodeHardware: () => request('/admin/settings/transcode-hardware'),
   adminPutSettings: (body) => request('/admin/settings', { method: 'PUT', body: JSON.stringify(body) }),
   adminResetTranscodeDefaults: () => request('/admin/settings/transcode-defaults', { method: 'POST' }),
+  adminMusicSourceConfig: () => request('/admin/music-sources/config'),
+  adminPutMusicSourceConfig: (body) => request('/admin/music-sources/config', { method: 'PUT', body: JSON.stringify(body) }),
+  adminTestMusicSources: (providers = []) => request('/admin/music-sources/test', { method: 'POST', body: JSON.stringify({ providers }) }),
+  adminSongExternalMatches: (songId, refresh = false, keyword = '', providers = []) => request(`/admin/songs/${songId}/external-matches?` + new URLSearchParams([
+    ['refresh', String(refresh)],
+    ...(keyword ? [['keyword', keyword]] : []),
+    ...providers.map(provider => ['providers', provider])
+  ]).toString()),
+  adminBatchSongExternalMatches: (songIds) => request('/admin/songs/external-matches/batch', { method: 'POST', body: JSON.stringify({ songIds }) }),
+  adminApplyExternalMatch: (songId, provider, externalId, fields, overrides = {}) => request(`/admin/songs/${songId}/external-matches/${encodeURIComponent(provider)}/${encodeURIComponent(externalId)}/apply`, { method: 'POST', body: JSON.stringify({ fields, overrides }) }),
+  adminApplyManualMetadata: (songId, fields, overrides) => request(`/admin/songs/${songId}/metadata/manual`, { method: 'POST', body: JSON.stringify({ fields, overrides }) }),
+  adminStartMetadataScrape: (body) => request('/admin/metadata-scrapes', { method: 'POST', body: JSON.stringify(body) }),
+  adminLatestMetadataScrape: () => request('/admin/metadata-scrapes/latest'),
+  adminMetadataScrape: (batchId, params = {}) => request(`/admin/metadata-scrapes/${encodeURIComponent(batchId)}?` + new URLSearchParams(
+    Object.entries(params).filter(([, value]) => value !== '' && value != null)
+  ).toString()),
+  adminPauseMetadataScrape: (batchId) => request(`/admin/metadata-scrapes/${encodeURIComponent(batchId)}/pause`, { method: 'POST' }),
+  adminResumeMetadataScrape: (batchId) => request(`/admin/metadata-scrapes/${encodeURIComponent(batchId)}/resume`, { method: 'POST' }),
+  adminRetryMetadataScrapeItem: (batchId, itemId) => request(`/admin/metadata-scrapes/${encodeURIComponent(batchId)}/items/${itemId}/retry`, { method: 'POST' }),
+  adminApplyMetadataScrapeItem: (batchId, itemId, body) => request(`/admin/metadata-scrapes/${encodeURIComponent(batchId)}/items/${itemId}/apply`, { method: 'POST', body: JSON.stringify(body) }),
   standbyContent: () => request('/standby/content'),
   adminUploadStandbyLogo: (file) => {
     const body = new FormData()
@@ -140,6 +163,10 @@ export const api = {
   adminAiConfig: () => request('/admin/ai/config'),
   adminAiPutConfig: (body) => request('/admin/ai/config', { method: 'PUT', body: JSON.stringify(body) }),
   adminAiModels: () => request('/admin/ai/config/models'),
+  adminArtists: (params = {}) => request('/admin/artists?' + new URLSearchParams(Object.entries(params).filter(([, value]) => value !== '' && value != null)).toString()),
+  adminAnalyzeArtist: (artist) => request('/admin/artists/analyze', { method: 'POST', body: JSON.stringify({ artist }) }),
+  adminAnalyzeArtists: (artists) => request('/admin/artists/analyze-batch', { method: 'POST', body: JSON.stringify({ artists }) }),
+  adminApplyArtistGender: (artist, gender) => request('/admin/artists/apply', { method: 'POST', body: JSON.stringify({ artist, gender }) }),
   adminAiTestConfig: () => request('/admin/ai/config/test', { method: 'POST' }),
   adminAiRepair: () => request('/admin/ai/repair', { method: 'POST' }),
   adminAiRepairProgress: (batchId) => request(`/admin/ai/repair/${encodeURIComponent(batchId)}`),

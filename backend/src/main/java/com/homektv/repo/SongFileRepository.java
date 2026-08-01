@@ -6,6 +6,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
+import java.util.Collection;
 import java.util.Optional;
 
 /** 歌曲文件数据访问层，操作 song_file 表。
@@ -18,6 +19,7 @@ public interface SongFileRepository extends JpaRepository<SongFile, Long> {
 
     Optional<SongFile> findByFilePath(String filePath);
     List<SongFile> findBySongIdAndValidTrueOrderByPriorityDesc(Long songId);
+    List<SongFile> findBySongIdInAndValidTrueOrderByPriorityDesc(Collection<Long> songIds);
     boolean existsBySourceMd5(String sourceMd5);
     boolean existsByOutputMd5(String outputMd5);
     List<SongFile> findByFileRoleOrderByImportedAtDesc(String fileRole);

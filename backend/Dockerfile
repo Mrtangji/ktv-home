@@ -27,12 +27,20 @@ FROM --platform=$BUILDPLATFORM ${BASE_REGISTRY}/library/maven:3.9-eclipse-temuri
 WORKDIR /build
 COPY backend/pom.xml .
 COPY backend/src ./src
+COPY dist/tv-apk ./src/main/resources/static/tv-apk
 COPY --from=web-build /workspace/backend/src/main/resources/static/m ./src/main/resources/static/m
 RUN --mount=type=cache,target=/root/.m2 \
     mvn -B clean package -DskipTests
 
 FROM ${BASE_REGISTRY}/library/eclipse-temurin:21-jre-alpine
+ARG KTV_RELEASE_VERSION=0.1.0-dev
+ARG KTV_RELEASE_VERSION_CODE=1
 WORKDIR /app
+
+ENV KTV_RELEASE_VERSION=${KTV_RELEASE_VERSION} \
+    KTV_RELEASE_VERSION_CODE=${KTV_RELEASE_VERSION_CODE} \
+    KTV_RELEASE_ARMEABI_V7A_APK=classpath:/static/tv-apk/home-ktv-tv-${KTV_RELEASE_VERSION}-armeabi-v7a.apk \
+    KTV_RELEASE_ARM64_V8A_APK=classpath:/static/tv-apk/home-ktv-tv-${KTV_RELEASE_VERSION}-arm64-v8a.apk
 
 # 打包 FFmpeg（含 ffprobe），供曲库扫描解析媒体。
 # Intel VAAPI requires the userspace iHD driver in addition to FFmpeg's VAAPI encoders.

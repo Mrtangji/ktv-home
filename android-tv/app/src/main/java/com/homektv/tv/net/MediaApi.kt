@@ -8,6 +8,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.MediaType.Companion.toMediaType
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
@@ -123,6 +124,54 @@ class MediaApi(private val config: AppConfig) {
         } catch (e: Exception) {
             Log.w(TAG, "standby content failed: ${e.message}")
             StandbyContent()
+        }
+    }
+
+    suspend fun fetchReleaseInfo(): ReleaseInfo? = withContext(Dispatchers.IO) {
+        try {
+            http.newCall(Request.Builder().url("${config.apiBase()}/release").build()).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    Log.w(TAG, "release info http ${resp.code}")
+                    return@withContext null
+                }
+                json.decodeFromString(ReleaseInfo.serializer(), resp.body?.string().orEmpty())
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "release info failed: ${e.message}")
+            null
+        }
+    }
+
+    /** Streams an APK into a temporary file and only exposes it after a complete response. */
+    suspend fun downloadApk(path: String, destination: File, expectedSize: Long = 0): Boolean = withContext(Dispatchers.IO) {
+        val temporary = File(destination.parentFile, "${destination.name}.part")
+        try {
+            destination.parentFile?.mkdirs()
+            temporary.delete()
+            val url = if (path.startsWith("http://") || path.startsWith("https://")) {
+                path
+            } else {
+                "${config.apiBase().removeSuffix("/api")}${if (path.startsWith('/')) path else "/$path"}"
+            }
+            http.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "APK download http ${response.code}")
+                    return@withContext false
+                }
+                val body = response.body ?: return@withContext false
+                temporary.outputStream().buffered().use { output -> body.byteStream().use { it.copyTo(output) } }
+            }
+            if (temporary.length() <= 0 || (expectedSize > 0 && temporary.length() != expectedSize)) {
+                Log.w(TAG, "APK size mismatch: expected=$expectedSize actual=${temporary.length()}")
+                return@withContext false
+            }
+            if (destination.exists() && !destination.delete()) return@withContext false
+            temporary.renameTo(destination)
+        } catch (e: Exception) {
+            Log.w(TAG, "APK download failed: ${e.message}")
+            false
+        } finally {
+            if (temporary.exists()) temporary.delete()
         }
     }
 

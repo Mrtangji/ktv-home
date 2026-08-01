@@ -108,6 +108,13 @@ public class AiConfigService {
         if (config.bulkModel().isBlank()) throw new ApiException("AI_MODEL_MISSING", "批量模型 ID 未配置，请先配置 AI 模型");
     }
 
+    /** Returns whether an AI request can be made without throwing a user-facing configuration error. */
+    public boolean isConfigured() {
+        ResolvedConfig config = resolve();
+        return config.enabled() && !config.baseUrl().isBlank() && !config.apiKey().isBlank()
+                && !config.bulkModel().isBlank();
+    }
+
     private void validate(ConfigUpdate value) {
         String baseUrl = value.baseUrl() == null ? "" : value.baseUrl().trim();
         if (Boolean.TRUE.equals(value.enabled()) && baseUrl.isBlank())

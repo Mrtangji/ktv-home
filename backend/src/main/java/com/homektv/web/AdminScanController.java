@@ -277,6 +277,11 @@ public class AdminScanController {
         );
     }
 
+    @GetMapping("/songs/{id}")
+    public AdminSongDto song(@PathVariable Long id) {
+        return adminService.getAdminSong(id);
+    }
+
     /**
      * 编辑曲目（P2.3）。
      *

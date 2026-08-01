@@ -16,7 +16,6 @@ import com.homektv.web.dto.VocalReviewDto;
 import com.homektv.ws.WsBroadcaster;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -26,10 +25,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collection;
-import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
-import java.util.Objects;
+import java.util.Map;
 
 /**
  * 管理后台服务（P2.1-P2.5，详设§8）。
@@ -87,24 +85,29 @@ public class AdminService {
 
     @Transactional(readOnly = true)
     public Page<AdminSongDto> listAdminSongs(String keyword, String type, String source, int page, int size) {
-        String normalized = keyword == null ? "" : keyword.trim().toLowerCase(Locale.ROOT);
-        List<AdminSongDto> filtered = songRepo.findAll().stream()
-                .sorted(Comparator.comparing(Song::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder())))
-                .filter(song -> type == null || type.isBlank()
-                        || ("unrecognized".equals(type) ? "unrecognized".equals(song.getStatus()) : type.equals(song.getMediaType())))
-                .filter(song -> normalized.isBlank()
-                        || song.getTitle().toLowerCase(Locale.ROOT).contains(normalized)
-                        || song.getArtist().toLowerCase(Locale.ROOT).contains(normalized))
-                .map(song -> fileRepo.findBySongIdAndValidTrueOrderByPriorityDesc(song.getId()).stream()
-                        .findFirst().map(file -> AdminSongDto.from(song, file)).orElse(null))
-                .filter(Objects::nonNull)
-                .filter(song -> source == null || source.isBlank() || source.equals(song.importSource()))
-                .toList();
         int safeSize = Math.max(1, Math.min(size, 200));
         int safePage = Math.max(0, page);
-        int from = Math.min(safePage * safeSize, filtered.size());
-        int to = Math.min(from + safeSize, filtered.size());
-        return new PageImpl<>(filtered.subList(from, to), PageRequest.of(safePage, safeSize), filtered.size());
+        Pageable pageable = PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "createdAt"));
+        Page<Song> songs = songRepo.searchAdminSongs(normalizeFilter(keyword), normalizeFilter(type),
+                normalizeFilter(source), pageable);
+        List<Long> songIds = songs.getContent().stream().map(Song::getId).toList();
+        Map<Long, SongFile> primaryFiles = new LinkedHashMap<>();
+        if (!songIds.isEmpty()) {
+            fileRepo.findBySongIdInAndValidTrueOrderByPriorityDesc(songIds)
+                    .forEach(file -> primaryFiles.putIfAbsent(file.getSongId(), file));
+        }
+        return songs.map(song -> AdminSongDto.from(song, primaryFiles.get(song.getId())));
+    }
+
+    @Transactional(readOnly = true)
+    public AdminSongDto getAdminSong(Long id) {
+        Song song = songRepo.findById(id).orElseThrow(() -> new ApiException("SONG_NOT_FOUND", "歌曲不存在"));
+        SongFile file = fileRepo.findBySongIdAndValidTrueOrderByPriorityDesc(id).stream().findFirst().orElse(null);
+        return AdminSongDto.from(song, file);
+    }
+
+    private static String normalizeFilter(String value) {
+        return value == null ? "" : value.trim();
     }
 
     /** 编辑曲目（P2.3）：改元数据后重算拼音；可粘贴歌词 */
@@ -126,6 +129,13 @@ public class AdminService {
         }
         if (req.language() != null) { song.setLanguage(req.language()); song.lockMetadata("language"); }
         if (req.vocalForm() != null && !req.vocalForm().isBlank()) { song.setVocalForm(req.vocalForm()); song.lockMetadata("vocalForm"); }
+        if (req.artistGender() != null && !req.artistGender().isBlank()) {
+            String gender = req.artistGender().trim();
+            if (!java.util.Set.of("男歌手", "女歌手", "组合", "未知").contains(gender))
+                throw new ApiException("INVALID_ARTIST_GENDER", "歌手类型只能是男歌手、女歌手、组合或未知");
+            song.setArtistGender(gender);
+            song.lockMetadata("artistGender");
+        }
         if (req.tags() != null) song.setTags(req.tags());
         if (req.lyricText() != null && !req.lyricText().isBlank()) {
             String path = assetWriter.writeLyric(song.getFingerprint(), req.lyricText());

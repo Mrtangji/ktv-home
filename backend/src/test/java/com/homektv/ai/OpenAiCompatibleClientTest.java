@@ -62,6 +62,54 @@ class OpenAiCompatibleClientTest {
     }
 
     @Test
+    void autoModeFallsBackWhenJsonResponseIsInvalid() throws Exception {
+        List<String> bodies = new ArrayList<>();
+        start(exchange -> {
+            String body = read(exchange);
+            bodies.add(body);
+            if (body.contains("response_format")) respond(exchange, 200, completion("analysis without json"));
+            else respond(exchange, 200, completion("{'ok':true,}"));
+        });
+
+        JsonNode result = client(AiConfigService.JsonMode.AUTO).completeJson("BULK", "system", "user", 100);
+
+        assertThat(result.path("ok").asBoolean()).isTrue();
+        assertThat(bodies).hasSize(2);
+        assertThat(bodies.get(0)).contains("response_format");
+        assertThat(bodies.get(1)).doesNotContain("response_format");
+    }
+
+    @Test
+    void acceptsSegmentedContentAndIgnoresThinkingText() throws Exception {
+        start(exchange -> {
+            read(exchange);
+            String response = new ObjectMapper().writeValueAsString(java.util.Map.of("choices", List.of(
+                    java.util.Map.of("message", java.util.Map.of("content", List.of(
+                            java.util.Map.of("type", "text", "text", "<think>先分析一下</think>"),
+                            java.util.Map.of("type", "text", "text", "结果如下：{\"ok\":true} 后续说明")))))));
+            respond(exchange, 200, response);
+        });
+
+        JsonNode result = client(AiConfigService.JsonMode.PROMPT_ONLY)
+                .completeJson("BULK", "system", "user", 100);
+
+        assertThat(result.path("ok").asBoolean()).isTrue();
+    }
+
+    @Test
+    void acceptsJsonFromReasoningContentWhenContentIsEmpty() throws Exception {
+        start(exchange -> {
+            read(exchange);
+            String response = new ObjectMapper().writeValueAsString(java.util.Map.of("choices", List.of(
+                    java.util.Map.of("message", java.util.Map.of("content", "", "reasoning_content", "{\"ok\":true}")))));
+            respond(exchange, 200, response);
+        });
+
+        assertThat(client(AiConfigService.JsonMode.PROMPT_ONLY).completeJson("BULK", "system", "user", 100)
+                .path("ok").asBoolean()).isTrue();
+    }
+
+    @Test
     void retriesRateLimitAndListsModels() throws Exception {
         AtomicInteger completions = new AtomicInteger();
         start(exchange -> {

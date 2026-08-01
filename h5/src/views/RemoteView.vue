@@ -4,7 +4,7 @@
     <!-- 当前曲目卡 / Now Playing Card -->
     <section class="sec">
       <div class="now">
-        <div class="cover"></div>
+        <div class="cover" :style="coverStyle"><Music2 v-if="!coverUrl" :size="22" /></div>
         <div class="grow">
           <div class="t">{{ song?.title || '暂无播放' }}</div>
           <div class="s" v-if="song">{{ song.artist }} · {{ player.nowPlaying?.orderedByNick || '' }} 点</div>
@@ -74,7 +74,7 @@ import { makeControls } from '../api/client'
 import { useToast } from '../composables/useToast'
 import { confirmDialog } from '../composables/useDialog'
 import TabBar from '../components/TabBar.vue'
-import { GlassWater, Hand, Lightbulb, Megaphone, Minus, PartyPopper, Pause, Play, Plus, RotateCcw, SkipForward } from 'lucide-vue-next'
+import { GlassWater, Hand, Lightbulb, Megaphone, Minus, Music2, PartyPopper, Pause, Play, Plus, RotateCcw, SkipForward } from 'lucide-vue-next'
 
 const player = usePlayerStore()
 const user = useUserStore()
@@ -82,6 +82,8 @@ const { toast } = useToast()
 const controls = makeControls(user.clientToken)
 
 const song = computed(() => player.nowPlaying?.song)
+const coverUrl = computed(() => song.value?.coverUrl || '')
+const coverStyle = computed(() => coverUrl.value ? { backgroundImage: `url(${coverUrl.value})` } : {})
 /**
  * 是否支持原/伴唱音轨切换（KTV 版本）。
  *
@@ -192,9 +194,8 @@ async function effect(e) {
   padding:10px 0 15px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;
 }
 .cover {
-  width:58px;height:58px;border-radius:6px;flex:none;
-  background:linear-gradient(rgba(4,10,12,.18),rgba(4,10,12,.18)),url('../assets/tv-player.png') center / cover;
-  border: 1px solid var(--glass-border);
+  width:58px;height:58px;border-radius:6px;flex:none;display:grid;place-items:center;
+  background:#202630 center / cover no-repeat;color:var(--dim2);border:1px solid var(--glass-border);
 }
 .now .t { font-size: 16px; font-weight: 800; }
 .now .s { font-size: 12px; color: var(--dim); margin-top: 3px; }

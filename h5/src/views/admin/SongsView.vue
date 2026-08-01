@@ -89,6 +89,7 @@
         <label>歌名<input v-model="form.title" /></label>
         <label>歌手<input v-model="form.artist" /></label>
         <label>语种<input v-model="form.language" placeholder="国语/粤语/英语…" /></label>
+        <label>歌手类型<select v-model="form.artistGender"><option value="未知">未知</option><option value="男歌手">男歌手</option><option value="女歌手">女歌手</option><option value="组合">组合</option></select></label>
         <label>歌词（粘贴 LRC，可选）<textarea v-model="form.lyricText" rows="4"></textarea></label>
         <div class="mr">
           <button class="btn ghost" @click="editing = null">取消</button>
@@ -152,7 +153,7 @@ const totalPages = ref(1)
 const scanning = ref(false)
 const editing = ref(null)
 const transcoding = ref(new Set())
-const form = reactive({ title: '', artist: '', language: '', lyricText: '' })
+const form = reactive({ title: '', artist: '', language: '', artistGender: '未知', lyricText: '' })
 const selected = ref(new Set())
 const reparseOpen = ref(false)
 const reparseRule = ref('artist_title')
@@ -208,7 +209,7 @@ async function scan() {
  */
 function edit(s) {
   editing.value = s
-  form.title = s.title; form.artist = s.artist; form.language = ''; form.lyricText = ''
+  form.title = s.title; form.artist = s.artist; form.language = ''; form.artistGender = s.artistGender || '未知'; form.lyricText = ''
 }
 /**
  * 提交编辑表单，保存歌曲信息到服务端。
@@ -219,7 +220,7 @@ async function save() {
   try {
     await api.adminEditSong(editing.value.id, {
       title: form.title, artist: form.artist,
-      language: form.language || null, lyricText: form.lyricText || null
+      language: form.language || null, artistGender: form.artistGender, lyricText: form.lyricText || null
     })
     editing.value = null
     await load()
@@ -340,7 +341,7 @@ function shortMd5(v) { return v ? `${v.slice(0, 8)}...${v.slice(-8)}` : '—' }
 .modal { background: rgba(20,24,34,.98); border: 1px solid var(--glass-border); border-radius: 16px; padding: 24px; width: 360px; }
 .mt { font-size: 15px; font-weight: 700; margin-bottom: 16px; }
 .modal label { display: block; font-size: 12px; color: var(--dim); margin-bottom: 12px; }
-.modal input, .modal textarea { width: 100%; margin-top: 6px; background: var(--panel2); border: 1px solid var(--glass-border);
+.modal input, .modal textarea, .modal select { width: 100%; margin-top: 6px; background: var(--panel2); border: 1px solid var(--glass-border);
   border-radius: 8px; padding: 8px 10px; color: var(--text); font-size: 13px; }
 .mr { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
 .reparse-modal { width: min(760px, 90vw); max-height: 82vh; display: flex; flex-direction: column; }.rule-row { display:flex;align-items:center;gap:18px;margin-bottom:12px }.rule-row label { margin:0;display:flex;align-items:center;gap:5px }.rule-row .btn { margin-left:auto }.preview-list { overflow:auto;border:1px solid var(--line);border-radius:10px;padding:0 12px;min-height:100px }.preview-item { padding:10px 0;border-bottom:1px solid var(--line) }.preview-item:last-child { border-bottom:0 }.preview-item.bad { opacity:.55 }.filename { color:var(--dim2);font-size:11px;margin-bottom:5px }.change { display:grid;grid-template-columns:1fr 25px 1fr;gap:7px;align-items:center;font-size:12px }.change b { color:var(--gold);text-align:center }.summary { margin-right:auto;color:var(--dim);font-size:12px;align-self:center }

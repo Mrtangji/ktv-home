@@ -35,6 +35,16 @@ app:
     enabled: ${KTV_DISCOVERY_ENABLED:true}
     instance-name: ${KTV_DISCOVERY_NAME:家庭KTV}
     udp-port: ${KTV_DISCOVERY_UDP_PORT:18888}
+  release:
+    version: ${KTV_RELEASE_VERSION:0.1.0-dev}
+    version-code: ${KTV_RELEASE_VERSION_CODE:1}
+    armeabi-v7a-apk: ${KTV_RELEASE_ARMEABI_V7A_APK:classpath:/static/tv-apk/home-ktv-tv-armeabi-v7a.apk}
+    arm64-v8a-apk: ${KTV_RELEASE_ARM64_V8A_APK:classpath:/static/tv-apk/home-ktv-tv-arm64-v8a.apk}
+    announcement:
+      enabled: ${KTV_RELEASE_NOTICE_ENABLED:true}
+      id: ${KTV_RELEASE_NOTICE_ID:${KTV_RELEASE_VERSION:0.1.0-dev}}
+      title: ${KTV_RELEASE_NOTICE_TITLE:Android TV 客户端已更新}
+      message: ${KTV_RELEASE_NOTICE_MESSAGE:新版本已随服务端发布，请根据电视设备架构下载并安装对应的 Android TV APK。升级后请进入“原始音乐管理”，先执行“自动清理”，再重新扫描原始音乐路径。}
   ai:
     enabled: ${KTV_AI_ENABLED:false}
     base-url: ${KTV_AI_BASE_URL:}

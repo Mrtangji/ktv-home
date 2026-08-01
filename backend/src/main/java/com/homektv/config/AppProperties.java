@@ -31,6 +31,9 @@ public class AppProperties {
     /** 局域网服务发现配置。LAN service discovery configuration. */
     private Discovery discovery = new Discovery();
 
+    /** Application release metadata and bundled Android TV packages. */
+    private Release release = new Release();
+
     public String getSourceLibraryPath() { return sourceLibraryPath; }
     public void setSourceLibraryPath(String sourceLibraryPath) { this.sourceLibraryPath = sourceLibraryPath; }
     public String getKtvLibraryPath() { return ktvLibraryPath; }
@@ -45,6 +48,43 @@ public class AppProperties {
     public void setAi(Ai ai) { this.ai = ai; }
     public Discovery getDiscovery() { return discovery; }
     public void setDiscovery(Discovery discovery) { this.discovery = discovery; }
+    public Release getRelease() { return release; }
+    public void setRelease(Release release) { this.release = release; }
+
+    public static class Release {
+        private String version = "0.1.0-dev";
+        private long versionCode = 1;
+        private String armeabiV7aApk = "classpath:/static/tv-apk/home-ktv-tv-armeabi-v7a.apk";
+        private String arm64V8aApk = "classpath:/static/tv-apk/home-ktv-tv-arm64-v8a.apk";
+        private Announcement announcement = new Announcement();
+
+        public String getVersion() { return version; }
+        public void setVersion(String version) { this.version = version; }
+        public long getVersionCode() { return versionCode; }
+        public void setVersionCode(long versionCode) { this.versionCode = versionCode; }
+        public String getArmeabiV7aApk() { return armeabiV7aApk; }
+        public void setArmeabiV7aApk(String armeabiV7aApk) { this.armeabiV7aApk = armeabiV7aApk; }
+        public String getArm64V8aApk() { return arm64V8aApk; }
+        public void setArm64V8aApk(String arm64V8aApk) { this.arm64V8aApk = arm64V8aApk; }
+        public Announcement getAnnouncement() { return announcement; }
+        public void setAnnouncement(Announcement announcement) { this.announcement = announcement; }
+    }
+
+    public static class Announcement {
+        private boolean enabled = true;
+        private String id = "";
+        private String title = "Android TV 客户端已更新";
+        private String message = "新版本已随服务端发布，请根据电视设备架构下载并安装对应的 Android TV APK。升级后请进入“原始音乐管理”，先执行“自动清理”，再重新扫描原始音乐路径。";
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getTitle() { return title; }
+        public void setTitle(String title) { this.title = title; }
+        public String getMessage() { return message; }
+        public void setMessage(String message) { this.message = message; }
+    }
 
     /**
      * 局域网服务发现配置。

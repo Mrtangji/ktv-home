@@ -28,11 +28,13 @@ public class AiAnalysisWorker {
     private final AiClassificationApplier classificationApplier;
     private final AiConcurrencyLimiter concurrencyLimiter;
     private final MediaImportRecordRepository importRecordRepository;
+    private final LocalClassificationService localClassificationService;
 
     public AiAnalysisWorker(AiAnalysisTaskRepository taskRepository, SongRepository songRepository,
                             OpenAiCompatibleClient aiClient, ObjectMapper objectMapper, AiConfigService configService,
                             AiAutoApplyPolicy autoApplyPolicy, AiClassificationApplier classificationApplier,
-                            AiConcurrencyLimiter concurrencyLimiter, MediaImportRecordRepository importRecordRepository) {
+                            AiConcurrencyLimiter concurrencyLimiter, MediaImportRecordRepository importRecordRepository,
+                            LocalClassificationService localClassificationService) {
         this.taskRepository = taskRepository;
         this.songRepository = songRepository;
         this.aiClient = aiClient;
@@ -42,6 +44,7 @@ public class AiAnalysisWorker {
         this.classificationApplier = classificationApplier;
         this.concurrencyLimiter = concurrencyLimiter;
         this.importRecordRepository = importRecordRepository;
+        this.localClassificationService = localClassificationService;
     }
 
     /**
@@ -69,21 +72,46 @@ public class AiAnalysisWorker {
                     .orElseThrow(() -> new IllegalStateException("导入记录不存在: " + task.getTargetId())) : null;
             AiConfigService.ResolvedConfig config = configService.resolve();
             AiSongClassification result;
-            try (AiConcurrencyLimiter.Permit ignored = concurrencyLimiter.acquire(task.getModelRole())) {
-                result = importTarget ? aiClient.classifyImport(importRecord, task.getModelRole())
-                        : aiClient.classify(song, task.getModelRole());
+            String fallbackReason = null;
+            if (!configService.isConfigured() || "LOCAL".equals(task.getModelRole())) {
+                result = importTarget ? localClassificationService.fromImport(importRecord)
+                        : localClassificationService.fromSong(song);
+                fallbackReason = "AI 未配置，已降级为本地解析结果，等待人工审核";
+            } else {
+                try {
+                    try (AiConcurrencyLimiter.Permit ignored = concurrencyLimiter.acquire(task.getModelRole())) {
+                        result = importTarget ? aiClient.classifyImport(importRecord, task.getModelRole())
+                                : aiClient.classify(song, task.getModelRole());
+                    }
+                } catch (RuntimeException providerFailure) {
+                    result = importTarget ? localClassificationService.fromImport(importRecord)
+                            : localClassificationService.fromSong(song);
+                    fallbackReason = "AI 服务不可用，已保留并使用本地解析结果：" + safeMessage(providerFailure);
+                }
+            }
+            if (fallbackReason != null) {
+                task.setModelRole("LOCAL");
+                task.setModel("LOCAL");
             }
             if (isPaused(taskId)) return;
-            if (config.reasoningModel() != null && !config.reasoningModel().isBlank()
+            if (fallbackReason == null && config.reasoningModel() != null && !config.reasoningModel().isBlank()
                     && (result.titleConfidence() < config.identityThreshold()
                     || result.artistConfidence() < config.identityThreshold()
                     || result.languageConfidence() < config.classificationThreshold()
                     || result.vocalFormConfidence() < config.classificationThreshold())) {
                 task.setModelRole("REASONING");
                 task.setModel(config.modelFor("REASONING"));
-                try (AiConcurrencyLimiter.Permit ignored = concurrencyLimiter.acquire("REASONING")) {
-                    result = importTarget ? aiClient.classifyImport(importRecord, "REASONING")
-                            : aiClient.classify(song, "REASONING");
+                try {
+                    try (AiConcurrencyLimiter.Permit ignored = concurrencyLimiter.acquire("REASONING")) {
+                        result = importTarget ? aiClient.classifyImport(importRecord, "REASONING")
+                                : aiClient.classify(song, "REASONING");
+                    }
+                } catch (RuntimeException providerFailure) {
+                    result = importTarget ? localClassificationService.fromImport(importRecord)
+                            : localClassificationService.fromSong(song);
+                    fallbackReason = "AI 增强模型不可用，已保留并使用本地解析结果：" + safeMessage(providerFailure);
+                    task.setModelRole("LOCAL");
+                    task.setModel("LOCAL");
                 }
                 if (isPaused(taskId)) return;
             }
@@ -92,7 +120,10 @@ public class AiAnalysisWorker {
                     "title", result.titleConfidence(), "artist", result.artistConfidence(),
                     "language", result.languageConfidence(), "vocalForm", result.vocalFormConfidence())));
             task.setEvidence(objectMapper.writeValueAsString(result.evidence()));
-            if (importTarget && applyImportRecord(importRecord, result, config.identityThreshold())) {
+            if (fallbackReason != null) {
+                task.setStatus("review");
+                task.setErrorMessage(fallbackReason);
+            } else if (importTarget && applyImportRecord(importRecord, result, config.identityThreshold())) {
                 task.setStatus("auto_applied");
             } else if (!importTarget && autoApplyPolicy.shouldAutoApply(result) && classificationApplier.applyAuto(task.getSongId(), result)) {
                 task.setStatus("auto_applied");

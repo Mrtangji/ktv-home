@@ -38,6 +38,7 @@ jobs:
       release_tag: ${{ steps.meta.outputs.release_tag }}
       version_name: ${{ steps.meta.outputs.version_name }}
       artifact_version: ${{ steps.meta.outputs.artifact_version }}
+      version_code: ${{ steps.meta.outputs.version_code }}
       channel: ${{ steps.meta.outputs.channel }}
       unstable: ${{ steps.meta.outputs.unstable }}
     steps:
@@ -62,46 +63,17 @@ jobs:
           echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
           echo "version_name=$version" >> "$GITHUB_OUTPUT"
           echo "artifact_version=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "version_code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
           [[ "$channel" == unstable ]] && echo "unstable=true" >> "$GITHUB_OUTPUT" || echo "unstable=false" >> "$GITHUB_OUTPUT"
 
-  image:
-    name: Publish multi-architecture image
-    runs-on: ubuntu-latest
-    needs: release-meta
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v5
-        id: metadata
-        with:
-          images: ${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=${{ needs.release-meta.outputs.release_tag }}
-            type=raw,value=unstable,enable=${{ needs.release-meta.outputs.unstable == 'true' }}
-            type=raw,value=latest,enable=${{ needs.release-meta.outputs.unstable != 'true' }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: backend/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
-
   android-tv:
-    name: Build TV APKs
+    name: Build signed TV APKs
     runs-on: ubuntu-latest
     needs: release-meta
     env:
       KTV_TV_VERSION_NAME: ${{ needs.release-meta.outputs.version_name }}
+      KTV_TV_VERSION_CODE: ${{ needs.release-meta.outputs.version_code }}
     defaults:
       run:
         working-directory: android-tv
@@ -123,7 +95,7 @@ jobs:
         run: |
           test -n "$KTV_TV_KEYSTORE_BASE64"
           printf '%s' "$KTV_TV_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/home-ktv-release.keystore"
-      - name: Build Debug and signed Release APKs
+      - name: Build signed Release APKs
         env:
           KTV_TV_KEYSTORE: ${{ runner.temp }}/home-ktv-release.keystore
           KTV_TV_STORE_PASSWORD: ${{ secrets.KTV_TV_STORE_PASSWORD }}
@@ -133,31 +105,64 @@ jobs:
           test -n "$KTV_TV_STORE_PASSWORD"
           test -n "$KTV_TV_KEY_ALIAS"
           test -n "$KTV_TV_KEY_PASSWORD"
-          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease
-      - name: Upload 32-bit Debug APK
+          ./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease
+      - name: Stage versioned APKs
+        run: |
+          mkdir -p staged-apks
+          cp app/build/outputs/apk/release/*armeabi-v7a*.apk \
+            "staged-apks/home-ktv-tv-${{ needs.release-meta.outputs.version_name }}-armeabi-v7a.apk"
+          cp app/build/outputs/apk/release/*arm64-v8a*.apk \
+            "staged-apks/home-ktv-tv-${{ needs.release-meta.outputs.version_name }}-arm64-v8a.apk"
+      - name: Upload signed Release APKs
         uses: actions/upload-artifact@v4
         with:
-          name: home-ktv-tv-${{ needs.release-meta.outputs.artifact_version }}-debug-armeabi-v7a
-          path: android-tv/app/build/outputs/apk/debug/*armeabi-v7a*.apk
+          name: home-ktv-tv-${{ needs.release-meta.outputs.artifact_version }}-release
+          path: android-tv/staged-apks/*.apk
           if-no-files-found: error
-      - name: Upload 64-bit Debug APK
-        uses: actions/upload-artifact@v4
+
+  image:
+    name: Publish image with TV APKs
+    runs-on: ubuntu-latest
+    needs: [release-meta, android-tv]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download signed TV APKs
+        uses: actions/download-artifact@v4
         with:
-          name: home-ktv-tv-${{ needs.release-meta.outputs.artifact_version }}-debug-arm64-v8a
-          path: android-tv/app/build/outputs/apk/debug/*arm64-v8a*.apk
-          if-no-files-found: error
-      - name: Upload 32-bit Release APK
-        uses: actions/upload-artifact@v4
+          name: home-ktv-tv-${{ needs.release-meta.outputs.artifact_version }}-release
+          path: downloaded-apks
+      - name: Add TV APKs to Docker build context
+        run: |
+          mkdir -p dist/tv-apk
+          cp "downloaded-apks/home-ktv-tv-${{ needs.release-meta.outputs.version_name }}-armeabi-v7a.apk" dist/tv-apk/
+          cp "downloaded-apks/home-ktv-tv-${{ needs.release-meta.outputs.version_name }}-arm64-v8a.apk" dist/tv-apk/
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
-          name: home-ktv-tv-${{ needs.release-meta.outputs.artifact_version }}-release-armeabi-v7a
-          path: android-tv/app/build/outputs/apk/release/*armeabi-v7a*.apk
-          if-no-files-found: error
-      - name: Upload 64-bit Release APK
-        uses: actions/upload-artifact@v4
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: metadata
         with:
-          name: home-ktv-tv-${{ needs.release-meta.outputs.artifact_version }}-release-arm64-v8a
-          path: android-tv/app/build/outputs/apk/release/*arm64-v8a*.apk
-          if-no-files-found: error
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.release-meta.outputs.release_tag }}
+            type=raw,value=unstable,enable=${{ needs.release-meta.outputs.unstable == 'true' }}
+            type=raw,value=latest,enable=${{ needs.release-meta.outputs.unstable != 'true' }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            KTV_RELEASE_VERSION=${{ needs.release-meta.outputs.version_name }}
+            KTV_RELEASE_VERSION_CODE=${{ needs.release-meta.outputs.version_code }}
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
 
   github-release:
     name: Create GitHub Release
@@ -167,8 +172,7 @@ jobs:
       - name: Download APK artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: home-ktv-tv-${{ needs.release-meta.outputs.artifact_version }}-*
-          merge-multiple: true
+          name: home-ktv-tv-${{ needs.release-meta.outputs.artifact_version }}-release
           path: release-assets
       - name: Publish GitHub Release with APKs
         uses: softprops/action-gh-release@v2

@@ -54,9 +54,11 @@ public class SpaController {
      *   /m/          → 首页 (home)
      *   /m/home      → 单段路由 (single-segment route)
      *   /m/artist/周杰伦、/m/admin/songs → 两段路由 (two-segment route)
+     *   /m/admin/ktv-library/metadata-scrape → 三段路由 (three-segment route)
      * @return forward path to /m/index.html
      */
-    @GetMapping({"/m/", "/m/{p:[^\\.]+}", "/m/{p:[^\\.]+}/{s:[^\\.]+}"})
+    @GetMapping({"/m/", "/m/{p:[^\\.]+}", "/m/{p:[^\\.]+}/{s:[^\\.]+}",
+            "/m/{p:[^\\.]+}/{s:[^\\.]+}/{t:[^\\.]+}"})
     public String forward() {
         return "forward:/m/index.html";
     }

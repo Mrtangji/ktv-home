@@ -22,6 +22,7 @@ import java.util.List;
 public class AiClassificationApplier {
     private static final java.util.Set<String> LANGUAGES = java.util.Set.of("国语", "粤语", "闽南语", "英语", "日语", "韩语", "纯音乐", "其他", "未知");
     private static final java.util.Set<String> VOCAL_FORMS = java.util.Set.of("独唱", "对唱", "合唱", "组合", "未知");
+    private static final java.util.Set<String> ARTIST_GENDERS = java.util.Set.of("男歌手", "女歌手", "组合", "未知");
     private final SongRepository songRepository;
     private final AiConfigService configService;
 
@@ -77,6 +78,12 @@ public class AiClassificationApplier {
         song.setAiAnalyzedAt(OffsetDateTime.now());
         song.setTags(mergeTags(song.getTags(), result));
         double classificationThreshold = configService.resolve().classificationThreshold();
+        if (!song.isMetadataLocked("artistGender") && validArtistGender(result.artistGender())
+                && !"未知".equals(result.artistGender())
+                && (reviewed || result.confidence() >= classificationThreshold)) {
+            song.setArtistGender(result.artistGender());
+            changed = true;
+        }
         if (!song.isMetadataLocked("language") && validLanguage(result.language())
                 && (reviewed || result.languageConfidence() >= classificationThreshold)) {
             song.setLanguage(result.language());
@@ -124,6 +131,7 @@ public class AiClassificationApplier {
 
     private boolean validLanguage(String value) { return value != null && LANGUAGES.contains(value); }
     private boolean validVocalForm(String value) { return value != null && VOCAL_FORMS.contains(value); }
+    private boolean validArtistGender(String value) { return value != null && ARTIST_GENDERS.contains(value); }
 
     // 合并现有标签与 AI 分类结果中的流派、主题、年代、演唱形式，去重并过滤空值和"未知"。
     // Merges current tags with genres, themes, era, and vocal form from the AI result,
