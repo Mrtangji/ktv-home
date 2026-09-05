@@ -34,7 +34,7 @@ services:
     # :latest and :vX.Y.Z come from release.yml when a v* tag is pushed.
     # master 分支的滚动构建，由 docker-image.yml 发布；
     # 推送 v* 标签后由 release.yml 发布 :latest 与 :vX.Y.Z。
-    image: ${KTV_RELEASE_IMAGE:-ghcr.io/mrtangji/ktv-home:master}
+    image: ${KTV_RELEASE_IMAGE:-docker.io/itangji/ktv-home:master}
     container_name: ${KTV_APP_CONTAINER_NAME:-ktv-app}
     environment:
       # Containers must use the Compose service name, never localhost.

@@ -104,9 +104,10 @@ GitHub Actions and does not compile anything on the NAS or host:
 docker compose -f docker-compose.prebuilt.yml up -d --pull always --wait
 ```
 
-It uses `ghcr.io/mrtangji/ktv-home:master` by default, which is the rolling
-build of the `master` branch. For production, set `KTV_RELEASE_IMAGE` in `.env`
-to a specific release tag such as `:v1.2.3` so upgrades are explicit.
+It uses the Docker Hub image `docker.io/itangji/ktv-home:master` by default,
+which is the rolling build of the `master` branch. For production, set
+`KTV_RELEASE_IMAGE` in `.env` to a specific release tag such as `:v1.2.3` so
+upgrades are explicit.
 
 To build from source instead, run:
 
@@ -252,7 +253,8 @@ daemon cannot load a multi-platform result:
 
 ```bash
 docker login ghcr.io
-./scripts/build-image.sh --platform linux/amd64,linux/arm64 --tag master --push
+docker login docker.io
+./scripts/build-image.sh --image itangji/ktv-home --platform linux/amd64,linux/arm64 --tag master --push
 ```
 
 > **Note:** `dist/tv-apk` in the repository only holds a placeholder, so locally

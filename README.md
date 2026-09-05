@@ -137,7 +137,7 @@ KTV_DB_PASSWORD=请替换为强密码
 docker compose -f docker-compose.prebuilt.yml up -d --pull always --wait
 ```
 
-默认使用 `ghcr.io/mrtangji/ktv-home:master`，即 master 分支的滚动构建镜像。
+默认使用 Docker Hub 的 `docker.io/itangji/ktv-home:master`，即 master 分支的滚动构建镜像。
 生产环境可在 `.env` 中将 `KTV_RELEASE_IMAGE` 设置为具体发布标签（如
 `:v1.2.3`），以避免镜像内容随构建自动变化。
 
@@ -314,7 +314,7 @@ source-music/
 | `KTV_DB_PASSWORD` | `ktv` | PostgreSQL 密码，正式部署必须修改 |
 | `KTV_IMAGE_REGISTRY` | `docker.m.daocloud.io` | Docker 基础镜像仓库前缀 |
 | `KTV_APP_IMAGE` | `home-ktv:latest` | 应用镜像名称 |
-| `KTV_RELEASE_IMAGE` | `ghcr.io/mrtangji/ktv-home:master` | 预编译 Compose 使用的 GitHub 容器镜像 |
+| `KTV_RELEASE_IMAGE` | `docker.io/itangji/ktv-home:master` | 预编译 Compose 使用的 Docker Hub 镜像 |
 | `JAVA_TOOL_OPTIONS` | `-XX:MaxRAMPercentage=70 -Xmx512m` | 容器 JVM 内存参数 |
 
 二维码默认使用 TV 访问服务端时的局域网 Host 地址。若网络中存在反向代理或多个网卡，可在管理后台设置“展示地址”，例如 `192.168.1.10:8080`。
@@ -480,7 +480,8 @@ Docker Hub 仓库地址：<https://hub.docker.com/r/itangji/ktv-home>
 
 ```bash
 docker login ghcr.io
-./scripts/build-image.sh --platform linux/amd64,linux/arm64 --tag master --push
+docker login docker.io
+./scripts/build-image.sh --image itangji/ktv-home --platform linux/amd64,linux/arm64 --tag master --push
 ```
 
 > **说明：**仓库内的 `dist/tv-apk` 默认只有占位文件，因此本地构建和 `master`
