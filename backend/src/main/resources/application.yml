@@ -24,9 +24,11 @@ server:
 
 # 应用自定义配置
 app:
+  # Container defaults. Compose binds these to ./source-music, ./music and ./data.
+  # 容器默认路径；Compose 分别绑定到 ./source-music、./music 和 ./data。
   source-library-path: ${KTV_SOURCE_LIBRARY_PATH:/source-music}
   ktv-library-path: ${KTV_LIBRARY_PATH:/music}
-  data-path: ${KTV_DATA_PATH:./data}
+  data-path: ${KTV_DATA_PATH:/data}
   config-master-key-path: ${KTV_CONFIG_MASTER_KEY_PATH:/data/secrets/config.key}
   ffprobe-path: ${KTV_FFPROBE_PATH:ffprobe}
   transcode:

@@ -116,11 +116,24 @@ cp .env.example .env
 ```dotenv
 KTV_SOURCE_MUSIC_DIR=/volume1/home-ktv/source-music
 KTV_MUSIC_DIR=/volume1/home-ktv/music
+KTV_DATA_DIR=/volume1/home-ktv/data
+KTV_PG_DIR=/volume1/home-ktv/postgres
 KTV_DB_PASSWORD=admin
+```
+
+如果不填写这些变量，Compose 会自动使用当前目录下的默认目录：
+
+```text
+./source-music  -> 容器 /source-music（原始素材）
+./music         -> 容器 /music（可点播曲库）
+./data          -> 容器 /data（封面、歌词、配置密钥等）
+./postgres      -> PostgreSQL 数据目录
 ```
 
 - `KTV_SOURCE_MUSIC_DIR`：放置未经处理的原始视频和音频。
 - `KTV_MUSIC_DIR`：存放已直拷或转码完成、可以点播的文件。
+- `KTV_DATA_DIR`：应用运行数据，包括封面、歌词和配置密钥。
+- `KTV_PG_DIR`：PostgreSQL 数据文件。不要随意删除。
 
 两个目录不要配置成同一路径。服务端会向曲库目录写入处理结果，请确保容器具有写权限。
 
@@ -308,7 +321,7 @@ source-music/
 | `KTV_SOURCE_MUSIC_DIR` | `./source-music` | 宿主机原始素材目录 |
 | `KTV_MUSIC_DIR` | `./music` | 宿主机可点播曲库目录 |
 | `KTV_DATA_DIR` | `./data` | 宿主机应用数据目录 |
-| `KTV_PG_DIR` | `./postgres` | 宿主机 PostgreSQL 数据目录 |
+| `KTV_PG_DIR` | `./postgres` | 宿主机 PostgreSQL 数据目录，勿随意删除 |
 | `KTV_HTTP_PORT` | `8080` | Web、API、WebSocket 和媒体流端口 |
 | `KTV_DISCOVERY_UDP_PORT` | `18888` | TV 自动发现 UDP 端口 |
 | `KTV_DISCOVERY_NAME` | `家庭KTV` | TV 发现列表中的名称 |

@@ -83,11 +83,23 @@ replace the database password:
 ```dotenv
 KTV_SOURCE_MUSIC_DIR=/volume1/home-ktv/source-music
 KTV_MUSIC_DIR=/volume1/home-ktv/music
+KTV_DATA_DIR=/volume1/home-ktv/data
+KTV_PG_DIR=/volume1/home-ktv/postgres
 KTV_DB_PASSWORD=admin
 ```
 
+If these variables are omitted, Compose uses directories in the project folder:
+
+```text
+./source-music  -> container /source-music (source media)
+./music         -> container /music (playable library)
+./data          -> container /data (covers, lyrics, and secret key)
+./postgres      -> PostgreSQL data directory
+```
+
 The server writes processed files into `KTV_MUSIC_DIR`, so ensure the container
-has write access. Never point both directory variables at the same path.
+has write access. Never point the source and playable library directories at the
+same path. Do not delete `KTV_PG_DIR` while the deployment contains data.
 
 ### 2. Start the stack
 

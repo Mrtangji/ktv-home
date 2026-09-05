@@ -16,8 +16,8 @@ public class AppProperties {
     /** TV 实际播放曲库目录（容器内 /music）。TV playback music library directory (inside container: /music). */
     private String ktvLibraryPath = "/music";
 
-    /** 数据缓存目录（封面/歌词）。Data cache directory (covers/lyrics). */
-    private String dataPath = "./data";
+    /** 数据缓存目录（容器内 /data）。Data cache directory (inside container: /data). */
+    private String dataPath = "/data";
 
     /** ffprobe 可执行路径。ffprobe executable path. */
     private String ffprobePath = "ffprobe";
