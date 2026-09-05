@@ -445,10 +445,10 @@ Actions** 中新增两个 Repository secrets：
 | --- | --- |
 | 推送到 `master` | `:master`、`:sha-<短 SHA>` |
 | 推送 `v*` 标签（由 `release.yml` 发布） | `:v1.2.3`、`:latest` |
-
-Docker Hub 仓库地址：<https://hub.docker.com/r/itangji/ktv-home>
 | Pull Request | 只构建校验，不推送 |
 | 手动运行 workflow | 自定义标签 |
+
+Docker Hub 仓库地址：<https://hub.docker.com/r/itangji/ktv-home>
 
 > **注意：**镜像命名空间取自仓库所有者，必须与当前仓库一致。若从上游 fork
 > 而来，请确认 `release.yml` 中的 `IMAGE_NAME` 已改为自己的命名空间，否则
