@@ -128,6 +128,11 @@ KTV_DB_PASSWORD=请替换为强密码
 
 推荐直接拉取 GitHub Actions 发布的多架构镜像，无需在 NAS 或主机上编译：
 
+> **数据库连接说明：**应用容器必须通过 Compose 服务名 `db` 连接 PostgreSQL，不能把
+> `SPRING_DATASOURCE_URL` 配成 `localhost:5432`。在容器内，`localhost` 指向的是
+> `ktv-app` 自己，而不是 `ktv-db`。如果你手动设置过这个环境变量，请删除它，或改为
+> `jdbc:postgresql://db:5432/ktv`。
+
 ```bash
 docker compose -f docker-compose.prebuilt.yml up -d --pull always --wait
 ```

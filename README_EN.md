@@ -91,6 +91,12 @@ has write access. Never point both directory variables at the same path.
 
 ### 2. Start the stack
 
+> **Database connection:** the application container must connect to PostgreSQL
+> through the Compose service name `db`, never `localhost:5432`. Inside a
+> container, `localhost` points back to `ktv-app`, not `ktv-db`. If you set
+> `SPRING_DATASOURCE_URL` manually, remove it or use
+> `jdbc:postgresql://db:5432/ktv`.
+
 The recommended deployment pulls the multi-architecture image published by
 GitHub Actions and does not compile anything on the NAS or host:
 

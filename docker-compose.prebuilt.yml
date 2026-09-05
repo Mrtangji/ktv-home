@@ -37,6 +37,8 @@ services:
     image: ${KTV_RELEASE_IMAGE:-ghcr.io/mrtangji/ktv-home:master}
     container_name: ${KTV_APP_CONTAINER_NAME:-ktv-app}
     environment:
+      # Containers must use the Compose service name, never localhost.
+      # 容器必须使用 Compose 服务名，不能使用 localhost。
       SERVER_PORT: ${KTV_HTTP_PORT:-8080}
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${KTV_DB_NAME:-ktv}
       SPRING_DATASOURCE_USERNAME: ${KTV_DB_USER:-ktv}

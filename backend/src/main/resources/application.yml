@@ -2,6 +2,8 @@ spring:
   application:
     name: home-ktv-server
   datasource:
+    # Compose injects SPRING_DATASOURCE_URL with the internal `db` service name.
+    # Keep localhost only as a convenient default for running the jar directly.
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/ktv}
     username: ${SPRING_DATASOURCE_USERNAME:ktv}
     password: ${SPRING_DATASOURCE_PASSWORD:ktv}

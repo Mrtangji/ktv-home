@@ -38,6 +38,8 @@ services:
       # Keep the application listener aligned with the published TCP port below.
       # 应用监听端口需与下方发布的 TCP 端口保持一致。
       SERVER_PORT: ${KTV_HTTP_PORT:-8080}
+      # Containers must use the Compose service name, never localhost.
+      # 容器必须使用 Compose 服务名，不能使用 localhost。
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${KTV_DB_NAME:-ktv}
       SPRING_DATASOURCE_USERNAME: ${KTV_DB_USER:-ktv}
       SPRING_DATASOURCE_PASSWORD: ${KTV_DB_PASSWORD:-ktv}

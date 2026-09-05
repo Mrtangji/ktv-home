@@ -42,6 +42,8 @@ services:
       # Intel 核显透传，用于 VAAPI 硬件加速。
       - /dev/dri:/dev/dri
     environment:
+      # Containers must use the Compose service name, never localhost.
+      # 容器必须使用 Compose 服务名，不能使用 localhost。
       SERVER_PORT: 8080
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/ktv
       SPRING_DATASOURCE_USERNAME: *db-user
