@@ -83,7 +83,7 @@ replace the database password:
 ```dotenv
 KTV_SOURCE_MUSIC_DIR=/volume1/home-ktv/source-music
 KTV_MUSIC_DIR=/volume1/home-ktv/music
-KTV_DB_PASSWORD=replace-with-a-strong-password
+KTV_DB_PASSWORD=admin
 ```
 
 The server writes processed files into `KTV_MUSIC_DIR`, so ensure the container
@@ -96,6 +96,10 @@ has write access. Never point both directory variables at the same path.
 > container, `localhost` points back to `ktv-app`, not `ktv-db`. If you set
 > `SPRING_DATASOURCE_URL` manually, remove it or use
 > `jdbc:postgresql://db:5432/ktv`.
+>
+> The default database password is currently set to `admin` as requested. It is
+> passed through `.env` / Compose environment variables and is not baked into the
+> Dockerfile or image layers.
 
 The recommended deployment pulls the multi-architecture image published by
 GitHub Actions and does not compile anything on the NAS or host:

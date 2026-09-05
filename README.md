@@ -116,7 +116,7 @@ cp .env.example .env
 ```dotenv
 KTV_SOURCE_MUSIC_DIR=/volume1/home-ktv/source-music
 KTV_MUSIC_DIR=/volume1/home-ktv/music
-KTV_DB_PASSWORD=请替换为强密码
+KTV_DB_PASSWORD=admin
 ```
 
 - `KTV_SOURCE_MUSIC_DIR`：放置未经处理的原始视频和音频。
@@ -132,6 +132,9 @@ KTV_DB_PASSWORD=请替换为强密码
 > `SPRING_DATASOURCE_URL` 配成 `localhost:5432`。在容器内，`localhost` 指向的是
 > `ktv-app` 自己，而不是 `ktv-db`。如果你手动设置过这个环境变量，请删除它，或改为
 > `jdbc:postgresql://db:5432/ktv`。
+>
+> 默认数据库密码已按当前部署要求设置为 `admin`。密码通过 `.env` / Compose 环境变量
+> 传入，不会写入 Dockerfile 或镜像层。
 
 ```bash
 docker compose -f docker-compose.prebuilt.yml up -d --pull always --wait
