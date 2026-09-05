@@ -27,7 +27,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE_NAME: ghcr.io/zhayinggang/ktv-home
+  # Must be lowercase and owned by this repository, otherwise GHCR rejects the push.
+  IMAGE_NAME: ghcr.io/mrtangji/ktv-home
   RAW_RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
 
 jobs:

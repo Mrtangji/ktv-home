@@ -98,9 +98,9 @@ GitHub Actions and does not compile anything on the NAS or host:
 docker compose -f docker-compose.prebuilt.yml up -d --pull always --wait
 ```
 
-It uses `ghcr.io/zhayinggang/ktv-home:latest` by default. For production, set
-`KTV_RELEASE_IMAGE` in `.env` to a specific release tag so upgrades are
-explicit.
+It uses `ghcr.io/mrtangji/ktv-home:master` by default, which is the rolling
+build of the `master` branch. For production, set `KTV_RELEASE_IMAGE` in `.env`
+to a specific release tag such as `:v1.2.3` so upgrades are explicit.
 
 To build from source instead, run:
 
@@ -190,6 +190,52 @@ The resulting APK is at
 | Mobile songbook | `http://<host-ip>:8080/m` |
 | Administration | `http://<host-ip>:8080/m/admin` |
 | Health check | `http://<host-ip>:8080/api/health` |
+
+## Building the Image
+
+Images are built and published to GitHub Container Registry by
+`.github/workflows/docker-image.yml` as `ghcr.io/mrtangji/ktv-home`.
+
+| Trigger | Resulting tags |
+| --- | --- |
+| Push to `master` | `:master`, `:sha-<short sha>` |
+| Push a `v*` tag (published by `release.yml`) | `:v1.2.3`, `:latest` |
+| Pull request | Build only, never pushed |
+| Manual workflow run | Custom tag |
+
+> **Note:** the image namespace comes from the repository owner. If this
+> repository is a fork, make sure `IMAGE_NAME` in `release.yml` points at your
+> own namespace, otherwise GHCR rejects the push with a permission error.
+
+If a NAS or host reports `denied` while pulling, either change the package
+visibility to **Public** under the repository **Packages** settings, or run
+`docker login ghcr.io` on that machine first.
+
+### Building locally
+
+The build context must be the repository root, because `backend/Dockerfile` also
+copies `h5/` and `dist/tv-apk` into the image.
+
+```bash
+# Linux / macOS / WSL
+./scripts/build-image.sh --tag dev
+
+# Windows PowerShell
+.\scripts\build-image.ps1 -Tag dev
+```
+
+Multi-architecture builds need buildx and must be pushed, because the local
+daemon cannot load a multi-platform result:
+
+```bash
+docker login ghcr.io
+./scripts/build-image.sh --platform linux/amd64,linux/arm64 --tag master --push
+```
+
+> **Note:** `dist/tv-apk` in the repository only holds a placeholder, so locally
+> built and `master` images do not bundle the Android TV APK. Only pushing a
+> `v*` tag makes `release.yml` inject the signed APKs; install the TV client
+> manually otherwise.
 
 ## Local Development
 

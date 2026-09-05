@@ -30,9 +30,11 @@ services:
     stop_grace_period: 1m
 
   ktv:
-    # Override KTV_RELEASE_IMAGE to pin a release tag instead of latest.
-    # 可通过 KTV_RELEASE_IMAGE 指定版本标签，避免始终使用 latest。
-    image: ${KTV_RELEASE_IMAGE:-ghcr.io/zhayinggang/ktv-home:latest}
+    # Rolling build of the master branch, published by docker-image.yml.
+    # :latest and :vX.Y.Z come from release.yml when a v* tag is pushed.
+    # master 分支的滚动构建，由 docker-image.yml 发布；
+    # 推送 v* 标签后由 release.yml 发布 :latest 与 :vX.Y.Z。
+    image: ${KTV_RELEASE_IMAGE:-ghcr.io/mrtangji/ktv-home:master}
     container_name: ${KTV_APP_CONTAINER_NAME:-ktv-app}
     environment:
       SERVER_PORT: ${KTV_HTTP_PORT:-8080}

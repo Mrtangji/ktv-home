@@ -1,0 +1,14 @@
+# Shell scripts run on Linux and NAS hosts, so keep LF in the repository
+# regardless of the committer's platform or core.autocrlf setting. A CRLF
+# shebang makes the kernel look for "/usr/bin/env bash\r" and fail.
+# 这些脚本运行在 Linux / NAS 上，仓库中必须保持 LF，不受提交者平台或
+# core.autocrlf 影响。shebang 若带 CR 会导致内核找不到解释器。
+*.sh text eol=lf
+
+# PowerShell scripts only ever run on Windows.
+*.ps1 text eol=crlf
+
+# Snapshots and media must never be rewritten by line-ending conversion.
+*.png binary
+*.jpg binary
+*.apk binary

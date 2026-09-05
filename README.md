@@ -132,8 +132,9 @@ KTV_DB_PASSWORD=请替换为强密码
 docker compose -f docker-compose.prebuilt.yml up -d --pull always --wait
 ```
 
-默认使用 `ghcr.io/zhayinggang/ktv-home:latest`。生产环境可在 `.env` 中将
-`KTV_RELEASE_IMAGE` 设置为具体的发布标签，以避免 `latest` 自动变化。
+默认使用 `ghcr.io/mrtangji/ktv-home:master`，即 master 分支的滚动构建镜像。
+生产环境可在 `.env` 中将 `KTV_RELEASE_IMAGE` 设置为具体发布标签（如
+`:v1.2.3`），以避免镜像内容随构建自动变化。
 
 需要从源码构建时使用：
 
@@ -308,7 +309,7 @@ source-music/
 | `KTV_DB_PASSWORD` | `ktv` | PostgreSQL 密码，正式部署必须修改 |
 | `KTV_IMAGE_REGISTRY` | `docker.m.daocloud.io` | Docker 基础镜像仓库前缀 |
 | `KTV_APP_IMAGE` | `home-ktv:latest` | 应用镜像名称 |
-| `KTV_RELEASE_IMAGE` | `ghcr.io/zhayinggang/ktv-home:latest` | 预编译 Compose 使用的 GitHub 容器镜像 |
+| `KTV_RELEASE_IMAGE` | `ghcr.io/mrtangji/ktv-home:master` | 预编译 Compose 使用的 GitHub 容器镜像 |
 | `JAVA_TOOL_OPTIONS` | `-XX:MaxRAMPercentage=70 -Xmx512m` | 容器 JVM 内存参数 |
 
 二维码默认使用 TV 访问服务端时的局域网 Host 地址。若网络中存在反向代理或多个网卡，可在管理后台设置“展示地址”，例如 `192.168.1.10:8080`。
@@ -419,6 +420,50 @@ docker compose logs -f db
 ```
 
 数据库备份包含歌曲元数据、设置、歌单、队列和播放历史，不包含原始媒体文件。`source-music` 和 `music` 目录需要使用 NAS 自身的备份方案。应用启动时会自动执行 Flyway 升级；正式更新前仍建议先备份数据库和媒体目录。当前迁移保留历史源记录，不通过升级脚本批量删除业务数据。
+
+## 构建镜像
+
+镜像由 `.github/workflows/docker-image.yml` 自动构建并发布到
+GitHub Container Registry，镜像名为 `ghcr.io/mrtangji/ktv-home`。
+
+| 触发条件 | 产出标签 |
+| --- | --- |
+| 推送到 `master` | `:master`、`:sha-<短 SHA>` |
+| 推送 `v*` 标签（由 `release.yml` 发布） | `:v1.2.3`、`:latest` |
+| Pull Request | 只构建校验，不推送 |
+| 手动运行 workflow | 自定义标签 |
+
+> **注意：**镜像命名空间取自仓库所有者，必须与当前仓库一致。若从上游 fork
+> 而来，请确认 `release.yml` 中的 `IMAGE_NAME` 已改为自己的命名空间，否则
+> 推送时会被 GHCR 以权限不足拒绝。
+
+若 NAS 或主机拉取镜像时提示 `denied`，请到仓库 **Packages** 设置中将该包的
+可见性调整为 **Public**，或先在目标机器执行 `docker login ghcr.io`。
+
+### 本地构建
+
+构建上下文必须是仓库根目录，因为 `backend/Dockerfile` 除了后端代码，还会复制
+`h5/` 与 `dist/tv-apk` 进入镜像。
+
+```bash
+# Linux / macOS / WSL
+./scripts/build-image.sh --tag dev
+
+# Windows PowerShell
+.\scripts\build-image.ps1 -Tag dev
+```
+
+构建多架构镜像并推送（需要 buildx，多架构结果无法加载到本地 daemon，必须与
+`--push` 一起使用）：
+
+```bash
+docker login ghcr.io
+./scripts/build-image.sh --platform linux/amd64,linux/arm64 --tag master --push
+```
+
+> **说明：**仓库内的 `dist/tv-apk` 默认只有占位文件，因此本地构建和 `master`
+> 滚动构建的镜像都不会内置 Android TV 安装包。只有推送 `v*` 标签时，
+> `release.yml` 才会把签名后的 APK 注入镜像；其他情况请在管理后台另行安装电视端。
 
 ## 本地开发
 

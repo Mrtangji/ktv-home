@@ -1,18 +1,175 @@
 name: Docker Image CI
 
+# Builds the server image from backend/Dockerfile and publishes it to GHCR.
+# 从 backend/Dockerfile 构建服务端镜像并发布到 GHCR。
+#
+# Tag strategy / 标签策略:
+#   push master       -> :master, :sha-<short sha>   滚动开发版
+#   tag v*            -> :v1.2.3, :latest            正式版，由 release.yml 发布
+#   pull request      -> 只构建校验，不推送
+#   workflow_dispatch -> 自定义标签
+
 on:
   push:
-    branches: [ "master" ]
+    branches: ["master"]
   pull_request:
-    branches: [ "master" ]
+    branches: ["master"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Image tag to publish, for example dev or v1.2.3
+        required: true
+        default: dev
+      platforms:
+        description: Target platforms
+        required: true
+        default: linux/amd64,linux/arm64
+        type: choice
+        options:
+          - linux/amd64,linux/arm64
+          - linux/amd64
+          - linux/arm64
+      push:
+        description: Push the built image to GHCR
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCKERFILE: backend/Dockerfile
+  # Baked into the image so the TV client can resolve the bundled APK filenames.
+  KTV_RELEASE_VERSION: 0.1.0-dev
+  KTV_RELEASE_VERSION_CODE: ${{ github.run_number }}
 
 jobs:
-
   build:
-
+    name: Build image
     runs-on: ubuntu-latest
-
+    timeout-minutes: 60
     steps:
-    - uses: actions/checkout@v4
-    - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag my-image-name:$(date +%s)
+      - uses: actions/checkout@v4
+
+      # GHCR rejects uppercase repository names: Mrtangji/ktv-home -> mrtangji/ktv-home.
+      - name: Resolve image coordinates
+        id: image
+        run: |
+          set -euo pipefail
+          name="ghcr.io/$(printf '%s' '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "Image: $name"
+
+      - name: Resolve platforms, push flag and cache target
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_PLATFORMS: ${{ inputs.platforms }}
+          INPUT_PUSH: ${{ inputs.push }}
+        run: |
+          set -euo pipefail
+          platforms="linux/amd64,linux/arm64"
+          push=true
+          case "$EVENT_NAME" in
+            pull_request)
+              # Fork PRs only receive a read-only token, and a single
+              # architecture keeps the validation build fast.
+              platforms="linux/amd64"
+              push=false
+              ;;
+            workflow_dispatch)
+              platforms="$INPUT_PLATFORMS"
+              push="$INPUT_PUSH"
+              ;;
+          esac
+
+          if [ "$push" = "true" ]; then
+            cache_from="type=gha"
+            cache_to="type=gha,mode=max"
+            load=false
+          else
+            # Fork pull requests only get a read-only token, which the gha
+            # cache backend cannot use; skip the cache to keep them green.
+            cache_from=""
+            cache_to=""
+            load=true
+          fi
+          # The local daemon cannot load a multi-platform build result.
+          case "$platforms" in
+            *,*) load=false ;;
+          esac
+
+          {
+            echo "platforms=$platforms"
+            echo "push=$push"
+            echo "load=$load"
+            echo "cache_from=$cache_from"
+            echo "cache_to=$cache_to"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+        if: steps.plan.outputs.platforms != 'linux/amd64'
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: steps.plan.outputs.push == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=ref,event=pr
+            type=raw,value=master,enable=${{ github.event_name == 'push' }}
+            type=sha,prefix=sha-,enable=${{ github.event_name == 'push' }}
+            type=raw,value=${{ inputs.tag || 'dev' }},enable=${{ github.event_name == 'workflow_dispatch' }}
+          labels: |
+            org.opencontainers.image.title=Home KTV
+            org.opencontainers.image.description=LAN KTV song-request server
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          # The context must stay at the repository root: the Dockerfile also
+          # copies h5/ and dist/tv-apk into the build.
+          context: .
+          file: ${{ env.DOCKERFILE }}
+          platforms: ${{ steps.plan.outputs.platforms }}
+          push: ${{ steps.plan.outputs.push }}
+          load: ${{ steps.plan.outputs.load }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            KTV_RELEASE_VERSION=${{ env.KTV_RELEASE_VERSION }}
+            KTV_RELEASE_VERSION_CODE=${{ env.KTV_RELEASE_VERSION_CODE }}
+          cache-from: ${{ steps.plan.outputs.cache_from }}
+          cache-to: ${{ steps.plan.outputs.cache_to }}
+
+      # Guards against the failure mode where the H5 bundle silently does not
+      # end up inside the fat jar, which only shows up as a blank /m page.
+      - name: Smoke test the built image
+        if: steps.plan.outputs.load == 'true'
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}:${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint sh "$IMAGE" -c '
+            set -e
+            test -f /app/app.jar
+            command -v ffmpeg >/dev/null
+            command -v ffprobe >/dev/null
+            # Zip entry names are stored uncompressed, so grep can find them.
+            grep -qa "BOOT-INF/classes/static/m/index.html" /app/app.jar
+            echo "image smoke test passed"
+          '

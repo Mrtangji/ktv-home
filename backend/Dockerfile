@@ -1,4 +1,10 @@
-# syntax=docker.m.daocloud.io/docker/dockerfile:1.7
+# Pinned BuildKit frontend. Kept on Docker Hub (not a regional mirror) so
+# GitHub Actions runners can always resolve it; local builds in regions where
+# Docker Hub is slow may swap this for a mirror such as
+# docker.m.daocloud.io/docker/dockerfile:1.7 .
+# 固定 BuildKit 前端版本。使用 Docker Hub 官方地址以确保 GitHub Actions 可以拉取；
+# 若本地访问 Docker Hub 较慢，可替换为镜像站地址。
+# syntax=docker/dockerfile:1.7
 
 ARG BASE_REGISTRY=docker.m.daocloud.io
 

@@ -1,15 +1,47 @@
+# Keep the build context small: the Dockerfile is invoked with the repository
+# root as the context, and media/runtime directories can hold tens of GB.
+# 构建上下文为仓库根目录，媒体与运行时目录可能有几十 GB，必须排除。
+
+# Version control and CI / 版本控制与 CI
 .git
 .github
+.gitignore
+.dockerignore
 .idea
+.vscode
 .claude
-design
+.codex-screenshots
+
+# Local secrets and runtime state / 本地密钥与运行时数据
+.env
+.env.*
+!.env.example
+
+# Bind-mounted host directories / 与容器绑定的宿主机目录
 music
+source-music
+data
+postgres
+
+# Documentation and tooling / 文档与辅助脚本
+docs
+logo
+scripts
+design
 sample-music
+
+# Build outputs and dependencies / 构建产物与依赖
 android-tv
 backend/target
 backend/data
-h5/node_modules
-h5/.vite
+**/node_modules
+**/target
+**/.vite
+.gradle
+
 *.log
 .DS_Store
+
+# TV APKs must stay in the context: the Dockerfile copies them into the image.
+# TV APK 需要保留：Dockerfile 会把它们复制进镜像。
 !dist/tv-apk/*.apk
