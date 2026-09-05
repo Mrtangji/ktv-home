@@ -6,7 +6,8 @@ spring:
     # The default is also container-safe for direct `docker run` usage.
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://db:5432/ktv}
     username: ${SPRING_DATASOURCE_USERNAME:ktv}
-    password: ${SPRING_DATASOURCE_PASSWORD:ktv}
+    # Compose overrides this value; admin is the requested direct-run default.
+    password: ${SPRING_DATASOURCE_PASSWORD:admin}
   jpa:
     hibernate:
       ddl-auto: validate          # 由 Flyway 建表，JPA 只校验映射
