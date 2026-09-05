@@ -424,12 +424,29 @@ docker compose logs -f db
 ## 构建镜像
 
 镜像由 `.github/workflows/docker-image.yml` 自动构建并发布到
-GitHub Container Registry，镜像名为 `ghcr.io/mrtangji/ktv-home`。
+GitHub Container Registry 和 Docker Hub：
+
+- GHCR：`ghcr.io/mrtangji/ktv-home`
+- Docker Hub：`docker.io/itangji/ktv-home`
+
+要发布到 Docker Hub，需要在 GitHub 仓库 **Settings → Secrets and variables →
+Actions** 中新增两个 Repository secrets：
+
+| Secret | 值 |
+| --- | --- |
+| `DOCKERHUB_USERNAME` | `itangji` |
+| `DOCKERHUB_TOKEN` | Docker Hub 的 Access Token（不要填账户密码） |
+
+其中 Access Token 在 Docker Hub **Account Settings → Personal access tokens**
+中创建。未配置这两个 Secret 时，GitHub Actions 仍会发布 GHCR，但 Docker Hub
+会保持空仓库。
 
 | 触发条件 | 产出标签 |
 | --- | --- |
 | 推送到 `master` | `:master`、`:sha-<短 SHA>` |
 | 推送 `v*` 标签（由 `release.yml` 发布） | `:v1.2.3`、`:latest` |
+
+Docker Hub 仓库地址：<https://hub.docker.com/r/itangji/ktv-home>
 | Pull Request | 只构建校验，不推送 |
 | 手动运行 workflow | 自定义标签 |
 

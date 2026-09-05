@@ -29,6 +29,7 @@ concurrency:
 env:
   # Must be lowercase and owned by this repository, otherwise GHCR rejects the push.
   IMAGE_NAME: ghcr.io/mrtangji/ktv-home
+  DOCKERHUB_IMAGE: itangji/ktv-home
   RAW_RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
 
 jobs:
@@ -126,6 +127,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [release-meta, android-tv]
     timeout-minutes: 30
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - name: Download signed TV APKs
@@ -145,10 +149,24 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/login-action@v3
+        if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
       - uses: docker/metadata-action@v5
-        id: metadata
+        id: ghcr_metadata
         with:
           images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.release-meta.outputs.release_tag }}
+            type=raw,value=unstable,enable=${{ needs.release-meta.outputs.unstable == 'true' }}
+            type=raw,value=latest,enable=${{ needs.release-meta.outputs.unstable != 'true' }}
+      - uses: docker/metadata-action@v5
+        id: dockerhub_metadata
+        if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
+        with:
+          images: ${{ env.DOCKERHUB_IMAGE }}
           tags: |
             type=raw,value=${{ needs.release-meta.outputs.release_tag }}
             type=raw,value=unstable,enable=${{ needs.release-meta.outputs.unstable == 'true' }}
@@ -162,8 +180,10 @@ jobs:
           build-args: |
             KTV_RELEASE_VERSION=${{ needs.release-meta.outputs.version_name }}
             KTV_RELEASE_VERSION_CODE=${{ needs.release-meta.outputs.version_code }}
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
+          tags: |
+            ${{ steps.ghcr_metadata.outputs.tags }}
+            ${{ steps.dockerhub_metadata.outputs.tags }}
+          labels: ${{ steps.ghcr_metadata.outputs.labels }}
 
   github-release:
     name: Create GitHub Release

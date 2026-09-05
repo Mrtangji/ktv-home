@@ -193,8 +193,25 @@ The resulting APK is at
 
 ## Building the Image
 
-Images are built and published to GitHub Container Registry by
-`.github/workflows/docker-image.yml` as `ghcr.io/mrtangji/ktv-home`.
+Images are built and published by `.github/workflows/docker-image.yml` to both
+registries:
+
+- GHCR: `ghcr.io/mrtangji/ktv-home`
+- Docker Hub: `docker.io/itangji/ktv-home`
+
+To publish to Docker Hub, add these repository secrets under **Settings → Secrets
+and variables → Actions**:
+
+| Secret | Value |
+| --- | --- |
+| `DOCKERHUB_USERNAME` | `itangji` |
+| `DOCKERHUB_TOKEN` | A Docker Hub access token (not the account password) |
+
+Create the token in Docker Hub **Account Settings → Personal access tokens**.
+Without both secrets, the workflow still publishes to GHCR but Docker Hub remains
+empty.
+
+Docker Hub repository: <https://hub.docker.com/r/itangji/ktv-home>
 
 | Trigger | Resulting tags |
 | --- | --- |
